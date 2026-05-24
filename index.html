@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Print Care Plus - POS Software</title>
+  <meta name="description" content="Offline Print Care Plus POS Software">
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/components2.css">
+  <link rel="stylesheet" href="css/pages.css">
+</head>
+<body>
+  <!-- Login Screen -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <img src="assets/logo.png" alt="Print Care Plus logo" class="login-brand-logo" onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
+        <div class="login-logo-fallback hidden">PC+</div>
+        <h1>Print Care Plus</h1>
+        <p>POS Software - Login to continue</p>
+      </div>
+      <form class="login-form" id="loginForm" autocomplete="off">
+        <div class="form-group">
+          <label for="loginUsername">Username</label>
+          <input type="text" id="loginUsername" class="form-input" placeholder="Enter username" required autofocus>
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" class="form-input" placeholder="Enter password" required>
+        </div>
+        <div class="login-error" id="loginError"></div>
+        <button type="submit" class="btn btn-primary btn-lg btn-block">Sign In</button>
+      </form>
+      <p style="text-align:center;margin-top:16px;font-size:12px;color:var(--text-secondary)">Owner: owner / owner123 · Workers: worker1, worker2, worker3 / worker123</p>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app" class="app hidden">
+    <aside id="sidebar" class="sidebar"></aside>
+    <div class="main-content">
+      <header id="header" class="header"></header>
+      <div id="pageContent" class="page-content"></div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modalOverlay" class="modal-overlay hidden"></div>
+  <div id="modalContainer" class="modal-container hidden"></div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Receipt Print Area (hidden) -->
+  <div id="receiptPrintArea" class="receipt-print-area" style="display:none;"></div>
+
+  <!-- Libraries -->
+  <script src="./node_modules/dexie/dist/dexie.js"></script>
+  <script src="./node_modules/chart.js/dist/chart.umd.js"></script>
+  <script src="./node_modules/jsbarcode/dist/JsBarcode.all.min.js"></script>
+
+  <!-- Core -->
+  <script src="js/utils.js"></script>
+  <script src="js/db.js"></script>
+
+  <!-- Components -->
+  <script src="js/components/toast.js"></script>
+  <script src="js/components/modal.js"></script>
+  <script src="js/components/sidebar.js"></script>
+  <script src="js/components/header.js"></script>
+  <script src="js/components/table.js"></script>
+  <script src="js/components/receipt.js"></script>
+
+  <!-- Pages -->
+  <script src="js/pages/dashboard.js"></script>
+  <script src="js/pages/billing.js"></script>
+  <script src="js/pages/bills.js"></script>
+  <script src="js/pages/products.js"></script>
+  <script src="js/pages/categories.js"></script>
+  <script src="js/pages/inventory.js"></script>
+  <script src="js/pages/customers.js"></script>
+  <script src="js/pages/suppliers.js"></script>
+  <script src="js/pages/purchases.js"></script>
+  <script src="js/pages/reports.js"></script>
+  <script src="js/pages/returns.js"></script>
+  <script src="js/pages/expenses.js"></script>
+  <script src="js/pages/profit.js"></script>
+  <script src="js/pages/settings.js"></script>
+
+  <!-- App Init -->
+  <script src="js/app.js"></script>
+</body>
+</html>
