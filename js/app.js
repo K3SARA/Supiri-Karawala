@@ -156,6 +156,10 @@ const App = {
     return this.fullAccessRoles.has(this.currentUser?.role);
   },
 
+  canStockIn() {
+    return this.hasFullAccess() || this.currentUser?.role === 'worker' || this.currentUser?.role === 'cashier';
+  },
+
   canAccessPage(page) {
     if (this.hasFullAccess()) return true;
     return this.workerAllowedPages.has(page);

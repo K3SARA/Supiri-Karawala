@@ -10,16 +10,19 @@ const InventoryPage = {
     const lowStock = products.filter(p => (p.stock || 0) <= (p.reorderLevel || 5));
     const totalStock = products.reduce((s, p) => s + (p.stock || 0), 0);
     const totalValue = products.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
-    const canAdjustStock = App.hasFullAccess();
+    const canManageStock = App.hasFullAccess();
+    const canStockIn = App.canStockIn();
 
     content.innerHTML = `
       <div class="page-header">
         <h2>Inventory</h2>
-        ${canAdjustStock ? `
+        ${canStockIn ? `
           <div class="page-header-actions">
             <button class="btn btn-success" id="stockInBtn">${Utils.icons.plus} Stock In</button>
-            <button class="btn btn-warning" id="stockOutBtn">${Utils.icons.download} Stock Out</button>
-            <button class="btn btn-danger" id="stockAdjustBtn">${Utils.icons.warning} Adjust</button>
+            ${canManageStock ? `
+              <button class="btn btn-warning" id="stockOutBtn">${Utils.icons.download} Stock Out</button>
+              <button class="btn btn-danger" id="stockAdjustBtn">${Utils.icons.warning} Adjust</button>
+            ` : ''}
           </div>
         ` : ''}
       </div>
@@ -89,20 +92,27 @@ const InventoryPage = {
       data: products
     });
 
-    if (canAdjustStock) {
+    if (canStockIn) {
       document.getElementById('stockInBtn').addEventListener('click', () => this.showAdjustmentForm('in'));
+    }
+    if (canManageStock) {
       document.getElementById('stockOutBtn').addEventListener('click', () => this.showAdjustmentForm('out'));
       document.getElementById('stockAdjustBtn').addEventListener('click', () => this.showAdjustmentForm('damaged'));
     }
   },
 
   async showAdjustmentForm(type) {
-    if (!App.hasFullAccess()) {
+    if (!App.hasFullAccess() && type !== 'in') {
+      Toast.warning('Access Denied', 'Owner access required');
+      return;
+    }
+    if (!App.canStockIn()) {
       Toast.warning('Access Denied', 'Owner access required');
       return;
     }
 
     const products = await DB.getProducts();
+    const canManageStock = App.hasFullAccess();
     const typeLabels = { in: 'Stock In', out: 'Stock Out', damaged: 'Damaged/Lost' };
     Modal.show({
       title: typeLabels[type] || 'Stock Adjustment',
@@ -123,9 +133,11 @@ const InventoryPage = {
             <label class="form-label">Type</label>
             <select class="form-select" id="adjType">
               <option value="in" ${type === 'in' ? 'selected' : ''}>Stock In</option>
-              <option value="out" ${type === 'out' ? 'selected' : ''}>Stock Out</option>
-              <option value="damaged" ${type === 'damaged' ? 'selected' : ''}>Damaged</option>
-              <option value="lost" ${type === 'lost' ? 'selected' : ''}>Lost</option>
+              ${canManageStock ? `
+                <option value="out" ${type === 'out' ? 'selected' : ''}>Stock Out</option>
+                <option value="damaged" ${type === 'damaged' ? 'selected' : ''}>Damaged</option>
+                <option value="lost" ${type === 'lost' ? 'selected' : ''}>Lost</option>
+              ` : ''}
             </select>
           </div>
         </div>
@@ -166,6 +178,10 @@ const InventoryPage = {
       const costPrice = parseFloat(document.getElementById('adjCostPrice').value) || 0;
       const reason = document.getElementById('adjReason').value.trim();
 
+      if (!App.hasFullAccess() && adjType !== 'in') {
+        Toast.warning('Access Denied', 'Owner access required');
+        return;
+      }
       if (!productId) { Toast.error('Required', 'Select a product'); return; }
       if (quantity <= 0) { Toast.error('Required', 'Enter a valid quantity'); return; }
       if (adjType === 'in' && costPrice <= 0) { Toast.error('Required', 'Enter a valid unit cost'); return; }
