@@ -17,6 +17,8 @@ const App = {
     await DB.seedIfEmpty();
     await DB.ensureDefaultUserAccounts();
     await DB.applyBusinessProfile();
+    await DB.removeDemoInventoryItems();
+    await DB.clearInitialInventoryItems();
     await DB.finalizeCloudSync();
 
     // Check dark mode

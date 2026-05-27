@@ -70,68 +70,170 @@ const Receipt = {
     const shopName = settings.shopName || 'Print Care Plus';
     const shopAddress = settings.shopAddress || '';
     const shopPhone = settings.shopPhone || '';
-    const footer = settings.receiptFooter || 'Thank you for your purchase!';
+    const footer = settings.receiptFooter || 'Thank You, Please Come Again!';
     const width = settings.receiptWidth || '80';
     const formattedAddress = Utils.escapeHtml(shopAddress).replace(/\n/g, '<br>');
     const receiptLogo = new URL('assets/logo-receipt-bw.png', window.location.href).href;
+    const createdAt = sale.createdAt ? new Date(sale.createdAt) : new Date();
+    const dateText = createdAt.toLocaleDateString('en-GB');
+    const timeText = createdAt.toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
 
     let customer = null;
     if (sale.customerId) customer = await DB.getCustomer(sale.customerId);
+    const customerName = customer?.name || 'Walk-In Customer';
 
     const receiptItems = await this.getReceiptItems(sale, saleItems);
     const itemsHtml = receiptItems.map(item => `
       <tr>
-        <td style="text-align:left;padding:1px 0">${Utils.escapeHtml(item.name || 'Item')}</td>
-        <td style="text-align:center;padding:1px 0">${item.quantity}</td>
-        <td style="text-align:right;padding:1px 0">${Utils.currencyPlain(item.price)}</td>
-        <td style="text-align:right;padding:1px 0">${Utils.currencyPlain(item.quantity * item.price - (item.discount || 0))}</td>
+        <td colspan="3" class="item-name">${Utils.escapeHtml(item.name || 'Item')}</td>
       </tr>
-    `).join('') || '<tr><td colspan="4" style="text-align:center;padding:4px 0">Returned</td></tr>';
+      <tr>
+        <td class="center qty-cell">${item.quantity}</td>
+        <td class="right">${Utils.currencyPlain(item.price)}</td>
+        <td class="right">${Utils.currencyPlain(item.quantity * item.price - (item.discount || 0))}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="3" class="center empty-row">Returned</td></tr>';
 
     return `
-      <div style="font-family:'Courier New',monospace;font-size:${width === '58' ? '11px' : '13px'};color:#000;width:${width === '58' ? '48mm' : '72mm'};padding:4mm;">
-        <div style="text-align:center;margin-bottom:6px;">
-          <img src="${receiptLogo}" alt="Print Care Plus logo" style="display:block;width:${width === '58' ? '26mm' : '34mm'};height:auto;margin:0 auto 3px;filter:grayscale(1);">
-          <div style="font-size:${width === '58' ? '15px' : '17px'};font-weight:bold;">${Utils.escapeHtml(shopName)}</div>
-          ${shopAddress ? `<div style="font-size:${width === '58' ? '10.5px' : '11px'}">${formattedAddress}</div>` : ''}
-          ${shopPhone ? `<div style="font-size:${width === '58' ? '10.5px' : '11px'}">Tel: ${Utils.escapeHtml(shopPhone)}</div>` : ''}
+      <style>
+        .thermal-receipt {
+          box-sizing: border-box;
+          width: ${width === '58' ? '50mm' : '74mm'};
+          padding: ${width === '58' ? '3mm' : '4mm'};
+          color: #000;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: ${width === '58' ? '10.5px' : '12px'};
+          line-height: 1.28;
+        }
+        .thermal-receipt * { box-sizing: border-box; }
+        .thermal-receipt .brand { text-align: center; margin-bottom: 5px; }
+        .thermal-receipt .brand img {
+          display: block;
+          width: ${width === '58' ? '18mm' : '22mm'};
+          height: auto;
+          margin: 0 auto 2px;
+          filter: grayscale(1) contrast(1.2);
+        }
+        .thermal-receipt .shop-title {
+          font-family: Georgia, 'Times New Roman', serif;
+          font-size: ${width === '58' ? '21px' : '27px'};
+          font-weight: 700;
+          line-height: 1;
+          margin-top: 1px;
+        }
+        .thermal-receipt .shop-subtitle {
+          font-weight: 700;
+          font-size: ${width === '58' ? '10px' : '12px'};
+          margin-top: 1px;
+        }
+        .thermal-receipt .shop-meta {
+          font-size: ${width === '58' ? '9px' : '10.5px'};
+          margin-top: 3px;
+        }
+        .thermal-receipt .line {
+          border-top: 1px dashed #000;
+          margin: 5px 0;
+          height: 0;
+        }
+        .thermal-receipt .meta-row,
+        .thermal-receipt .total-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .thermal-receipt table {
+          width: 100%;
+          border-collapse: collapse;
+          font: inherit;
+        }
+        .thermal-receipt th {
+          background: #3f3f3f;
+          color: #fff;
+          padding: 2px 3px;
+          font-weight: 700;
+        }
+        .thermal-receipt td {
+          padding: 1px 3px;
+          vertical-align: top;
+        }
+        .thermal-receipt .item-name {
+          padding-top: 4px;
+          text-transform: uppercase;
+          word-break: break-word;
+        }
+        .thermal-receipt .qty-cell { width: 22%; }
+        .thermal-receipt .right { text-align: right; }
+        .thermal-receipt .center { text-align: center; }
+        .thermal-receipt .empty-row { padding: 6px 0; }
+        .thermal-receipt .summary { padding: 0 2px; }
+        .thermal-receipt .summary .label { font-weight: 700; }
+        .thermal-receipt .grand { font-weight: 800; font-size: ${width === '58' ? '12px' : '14px'}; }
+        .thermal-receipt .footer {
+          text-align: center;
+          margin-top: 6px;
+          font-weight: 700;
+          font-size: ${width === '58' ? '10px' : '12px'};
+        }
+        .thermal-receipt .powered {
+          text-align: center;
+          margin-top: 4px;
+          font-size: ${width === '58' ? '8.5px' : '10px'};
+          font-weight: 700;
+        }
+        .thermal-receipt #receiptBarcode svg {
+          display: block;
+          max-width: 100%;
+          height: auto;
+          margin: 0 auto;
+        }
+      </style>
+      <div class="thermal-receipt">
+        <div class="brand">
+          <img src="${receiptLogo}" alt="Print Care Plus logo">
+          <div class="shop-title">${Utils.escapeHtml(shopName)}</div>
+          <div class="shop-subtitle">For all printing solutions</div>
+          ${shopAddress ? `<div class="shop-meta">${formattedAddress}</div>` : ''}
+          ${shopPhone ? `<div class="shop-meta">Tel: ${Utils.escapeHtml(shopPhone)}</div>` : ''}
         </div>
-        <div style="border-top:1px dashed #000;margin:4px 0;"></div>
-        <div style="font-size:${width === '58' ? '10.5px' : '11px'};">
-          <div>Invoice: ${sale.invoiceNo || 'N/A'}</div>
-          <div>Date: ${Utils.formatDateTime(sale.createdAt)}</div>
-          ${customer && customer.name !== 'Walk-in Customer' ? `<div>Customer: ${customer.name}</div>` : ''}
-          <div>Cashier: ${sale.cashierName || 'Admin'}</div>
+        <div class="line"></div>
+        <div>
+          <div class="meta-row"><span>Date: ${dateText}</span><span>Time: ${timeText}</span></div>
+          <div>Invoice No: ${Utils.escapeHtml(sale.invoiceNo || 'N/A')}</div>
+          <div>Cashier: ${Utils.escapeHtml(sale.cashierName || 'Admin')}</div>
+          <div>Customer: ${Utils.escapeHtml(customerName)}</div>
         </div>
-        <div style="border-top:1px dashed #000;margin:4px 0;"></div>
-        <table style="width:100%;border-collapse:collapse;font-size:${width === '58' ? '10px' : '12px'};">
-          <tr style="font-weight:bold;border-bottom:1px solid #000;">
-            <td style="text-align:left;padding:2px 0">Item</td>
-            <td style="text-align:center;padding:2px 0">Qty</td>
-            <td style="text-align:right;padding:2px 0">Price</td>
-            <td style="text-align:right;padding:2px 0">Total</td>
-          </tr>
+        <div class="line"></div>
+        <table>
+          <thead>
+            <tr>
+              <th class="center">Qty</th>
+              <th class="right">Price</th>
+              <th class="right">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
           ${itemsHtml}
+          </tbody>
         </table>
-        <div style="border-top:1px dashed #000;margin:4px 0;"></div>
-        <table style="width:100%;font-size:${width === '58' ? '10.5px' : '12px'};">
-          <tr><td>Sub Total</td><td style="text-align:right">${Utils.currencyPlain(sale.subtotal)}</td></tr>
-          ${sale.discount > 0 ? `<tr><td>Discount</td><td style="text-align:right">-${Utils.currencyPlain(sale.discount)}</td></tr>` : ''}
-          ${sale.tax > 0 ? `<tr><td>Tax</td><td style="text-align:right">${Utils.currencyPlain(sale.tax)}</td></tr>` : ''}
-          <tr style="font-size:${width === '58' ? '14px' : '15px'};font-weight:bold;border-top:1px solid #000;">
-            <td style="padding-top:4px">TOTAL</td>
-            <td style="text-align:right;padding-top:4px">LKR ${Utils.currencyPlain(sale.total)}</td>
-          </tr>
-        </table>
-        <div style="border-top:1px dashed #000;margin:4px 0;"></div>
-        <table style="width:100%;font-size:${width === '58' ? '10.5px' : '11px'};">
-          <tr><td>Payment</td><td style="text-align:right">${this.paymentLabel(sale.paymentMethod)}</td></tr>
-          <tr><td>Paid</td><td style="text-align:right">LKR ${Utils.currencyPlain(sale.amountPaid)}</td></tr>
-          <tr><td>Change</td><td style="text-align:right">LKR ${Utils.currencyPlain(sale.change || 0)}</td></tr>
-          ${sale.dueAmount > 0 ? `<tr style="font-weight:bold;color:red"><td>Due</td><td style="text-align:right">LKR ${Utils.currencyPlain(sale.dueAmount)}</td></tr>` : ''}
-        </table>
-        <div style="border-top:1px dashed #000;margin:6px 0;"></div>
-        <div style="text-align:center;font-size:${width === '58' ? '10.5px' : '11px'};">${Utils.escapeHtml(footer)}</div>
+        <div class="line"></div>
+        <div class="summary">
+          <div class="total-row"><span>Subtotal:</span><span>LKR ${Utils.currencyPlain(sale.subtotal)}</span></div>
+          ${sale.discount > 0 ? `<div class="total-row"><span>Discount:</span><span>- LKR ${Utils.currencyPlain(sale.discount)}</span></div>` : ''}
+          ${sale.tax > 0 ? `<div class="total-row"><span>Tax:</span><span>LKR ${Utils.currencyPlain(sale.tax)}</span></div>` : ''}
+          <div class="total-row grand"><span>Total:</span><span>LKR ${Utils.currencyPlain(sale.total)}</span></div>
+          <div class="total-row"><span class="label">Payment:</span><span>${this.paymentLabel(sale.paymentMethod)}</span></div>
+          <div class="total-row"><span>Cash Paid:</span><span>LKR ${Utils.currencyPlain(sale.amountPaid)}</span></div>
+          <div class="total-row"><span class="label">Balance:</span><span>LKR ${Utils.currencyPlain(sale.change || 0)}</span></div>
+          ${sale.dueAmount > 0 ? `<div class="total-row grand"><span>Due:</span><span>LKR ${Utils.currencyPlain(sale.dueAmount)}</span></div>` : ''}
+          <div class="total-row"><span>Total Items:</span><span>${receiptItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)}</span></div>
+        </div>
+        <div class="line"></div>
+        <div class="footer">${Utils.escapeHtml(footer)}</div>
+        <div class="powered">Powered by J&amp;co.</div>
         <div id="receiptBarcode" style="text-align:center;margin-top:6px;"></div>
       </div>
     `;
@@ -143,7 +245,7 @@ const Receipt = {
     const shopAddress = settings.shopAddress || '';
     const shopPhone = settings.shopPhone || '';
     const shopEmail = settings.shopEmail || '';
-    const footer = settings.receiptFooter || 'Thank you for your purchase!';
+    const footer = settings.receiptFooter || 'Thank You, Please Come Again!';
     const logo = new URL('assets/logo.png', window.location.href).href;
     const customer = sale.customerId ? await DB.getCustomer(sale.customerId) : null;
     const status = sale.status === 'voided' ? 'Voided' : ((sale.dueAmount || 0) > 0 ? 'Credit' : 'Paid');
@@ -239,7 +341,7 @@ const Receipt = {
           <tbody>${itemRows || '<tr><td colspan="6" class="center">No items</td></tr>'}</tbody>
         </table>
         <div class="bottom">
-          <div class="note"><b>Notes / Terms</b><div class="muted" style="margin-top:4mm">${Utils.escapeHtml(footer)}<br>Goods once sold are not returnable unless stated.<br>Please keep this receipt for future reference.</div></div>
+          <div class="note"><b>Notes / Terms</b><div class="muted" style="margin-top:4mm">${Utils.escapeHtml(footer)}<br>Goods once sold are not returnable unless stated.<br>Please keep this receipt for future reference.<br>Powered by J&amp;co.</div></div>
           <div class="totals">
             <div class="total-row"><span>Sub Total</span><span>${Utils.currencyPlain(sale.subtotal || 0)}</span></div>
             <div class="total-row"><span>Discount</span><span>${Utils.currencyPlain(sale.discount || 0)}</span></div>
@@ -268,7 +370,15 @@ const Receipt = {
       if (barcodeEl && sale.invoiceNo) {
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         barcodeEl.appendChild(svg);
-        JsBarcode(svg, sale.invoiceNo, { width: 1.5, height: 30, fontSize: 10, margin: 0 });
+        const receiptWidth = await DB.getSetting('receiptWidth');
+        JsBarcode(svg, sale.invoiceNo, {
+          format: 'CODE128',
+          width: receiptWidth === '58' ? 0.42 : 0.58,
+          height: receiptWidth === '58' ? 20 : 24,
+          fontSize: receiptWidth === '58' ? 6 : 7,
+          margin: 0,
+          displayValue: true
+        });
       }
     } catch(e) {}
 

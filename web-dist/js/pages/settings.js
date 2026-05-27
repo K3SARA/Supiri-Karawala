@@ -147,6 +147,7 @@ const SettingsPage = {
               <button class="btn btn-primary" id="savePrintersBtn">${Utils.icons.check} Save</button>
               <button class="btn btn-outline" id="refreshPrintersBtn">${Utils.icons.refresh} Refresh</button>
               <button class="btn btn-warning" id="testLabelPrinterBtn" ${printers.length ? '' : 'disabled'}>${Utils.icons.print} Test Label</button>
+              <button class="btn btn-warning" id="testCashDrawerBtn" ${printers.length && window.PrintCarePlus?.openCashDrawer ? '' : 'disabled'}>${Utils.icons.cash} Test Drawer</button>
             </div>
           </div>
         `;
@@ -170,6 +171,17 @@ const SettingsPage = {
               barcode: '123456789012',
               sellingPrice: 0
             });
+          }
+        });
+        document.getElementById('testCashDrawerBtn')?.addEventListener('click', async () => {
+          await DB.setSetting('receiptPrinter', document.getElementById('setReceiptPrinter').value);
+          try {
+            const result = await window.PrintCarePlus.openCashDrawer({
+              deviceName: document.getElementById('setReceiptPrinter').value || undefined
+            });
+            Toast.success('Cash Drawer', result?.printer ? `Open command sent to ${result.printer}` : 'Open command sent');
+          } catch (err) {
+            Toast.error('Cash Drawer', err.message || 'Could not open the cash drawer');
           }
         });
         break;

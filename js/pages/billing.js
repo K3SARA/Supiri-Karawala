@@ -551,6 +551,7 @@ const BillingPage = {
 
       // Auto print
       const saleItems = sale.items;
+      this.openCashDrawer();
       Receipt.print(sale, saleItems);
 
       // Start new order
@@ -558,6 +559,17 @@ const BillingPage = {
       Sidebar.updateLowStockBadge();
     } catch (err) {
       Toast.error('Error', 'Failed to save order: ' + err.message);
+    }
+  },
+
+  async openCashDrawer() {
+    if (!window.PrintCarePlus?.openCashDrawer) return;
+    try {
+      const receiptPrinter = await DB.getSetting('receiptPrinter');
+      await window.PrintCarePlus.openCashDrawer({ deviceName: receiptPrinter || undefined });
+    } catch (err) {
+      console.warn('Cash drawer did not open:', err);
+      Toast.warning('Cash Drawer', err.message || 'Could not open the cash drawer');
     }
   },
 

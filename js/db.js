@@ -30,6 +30,68 @@ const DB = {
     await this.initCloudSync();
   },
 
+  demoProductBarcodes() {
+    return [
+      '100001','100002','100003','100004','100005','100006','100007',
+      '200001','200002','200003','200004',
+      '300001','300002','300003',
+      '400001','400002','400003',
+      '500001','500002','500003','500004',
+      '600001','600002','600003','600004','600005','600006',
+      '700001','700002','700003',
+      '800001','800002',
+      '900001','900002','900003',
+      '1000001','1000002','1000003',
+      '1100001','1100002',
+      '1200001','1200002'
+    ];
+  },
+
+  async removeDemoInventoryItems() {
+    const migrationKey = 'demoInventoryRemovedVersion';
+    if (await this.getSetting(migrationKey) === 'print-care-plus-2026-05') return;
+
+    const demoBarcodes = new Set(this.demoProductBarcodes());
+    const demoProducts = (await this.db.products.toArray()).filter(p => demoBarcodes.has(String(p.barcode || '')));
+    const demoProductIds = demoProducts.map(p => p.id);
+
+    if (demoProductIds.length > 0) {
+      await this.db.transaction('rw', this.db.products, this.db.variations, async () => {
+        for (const productId of demoProductIds) {
+          await this.db.variations.where('productId').equals(productId).delete();
+          await this.db.products.delete(productId);
+        }
+      });
+    }
+
+    await this.setSetting(migrationKey, 'print-care-plus-2026-05');
+  },
+
+  async clearInitialInventoryItems() {
+    const migrationKey = 'initialInventoryClearedVersion';
+    if (await this.getSetting(migrationKey) === 'print-care-plus-empty-inventory-2026-05-24') return;
+
+    await this.db.transaction(
+      'rw',
+      this.db.products,
+      this.db.categories,
+      this.db.variations,
+      this.db.stockAdjustments,
+      this.db.expenses,
+      async () => {
+        await this.db.variations.clear();
+        await this.db.products.clear();
+        await this.db.categories.clear();
+        await this.db.stockAdjustments.clear();
+        await this.db.expenses
+          .filter(expense => Boolean(expense.stockAdjustmentId))
+          .delete();
+      }
+    );
+
+    await this.setSetting(migrationKey, 'print-care-plus-empty-inventory-2026-05-24');
+  },
+
   async initCloudSync() {
     if (location.protocol === 'file:' || !window.fetch) return;
 
@@ -925,7 +987,7 @@ const DB = {
       { key: 'shopAddress', value: 'No.05,\nSchool Road,\nSooriyawewa.' },
       { key: 'shopPhone', value: '078 76000 17' },
       { key: 'shopEmail', value: 'info@myshop.lk' },
-      { key: 'receiptFooter', value: 'Thank you for your purchase!' },
+      { key: 'receiptFooter', value: 'Thank You, Please Come Again!' },
       { key: 'taxRate', value: '0' },
       { key: 'taxName', value: 'Tax' },
       { key: 'taxEnabled', value: 'false' },
