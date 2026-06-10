@@ -150,7 +150,21 @@ const App = {
         Chart.helpers?.each(Chart.instances, (instance) => instance.destroy());
       } catch(e) {}
 
-      pageHandler.render();
+      // Show loading spinner
+      const content = document.getElementById('pageContent');
+      content.innerHTML = '<div class="spinner"></div>';
+
+      // Await render and catch errors
+      pageHandler.render().catch(err => {
+        console.error(`Page render error [${page}]:`, err);
+        content.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <h4>Failed to load page</h4>
+            <p>${err?.message || 'An unexpected error occurred.'}</p>
+            <button class="btn btn-primary" style="margin-top:16px" onclick="App.navigate('${page}')">Retry</button>
+          </div>`;
+      });
     }
   },
 
