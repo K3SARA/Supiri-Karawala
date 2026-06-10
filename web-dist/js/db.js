@@ -27,7 +27,19 @@ const DB = {
       settings: 'key'
     });
     await this.db.open();
+
+    // Read cloud settings before initialization
+    const cloudUrlSetting = await this.db.settings.get('cloudUrl');
+    this._cloudUrl = cloudUrlSetting ? cloudUrlSetting.value : '';
+    const cloudEnabledSetting = await this.db.settings.get('cloudEnabled');
+    this._cloudEnabledOverride = cloudEnabledSetting ? (cloudEnabledSetting.value === 'true') : false;
+
     await this.initCloudSync();
+  },
+
+  getCloudUrl(path) {
+    const base = this._cloudUrl ? this._cloudUrl.replace(/\/$/, '') : '';
+    return `${base}${path}`;
   },
 
   demoProductBarcodes() {
@@ -93,10 +105,13 @@ const DB = {
   },
 
   async initCloudSync() {
-    if (location.protocol === 'file:' || !window.fetch) return;
+    const isLocalFile = location.protocol === 'file:';
+    const hasOverride = this._cloudEnabledOverride && this._cloudUrl;
+
+    if (!hasOverride && (isLocalFile || !window.fetch)) return;
 
     try {
-      const res = await fetch('/api/health', { cache: 'no-store' });
+      const res = await fetch(this.getCloudUrl('/api/health'), { cache: 'no-store' });
       if (!res.ok) return;
       const health = await res.json();
       if (!health.database) return;
@@ -122,7 +137,7 @@ const DB = {
 
     if (!this.cloudInitialized) {
       const data = await this.exportData();
-      const res = await fetch('/api/db/snapshot', {
+      const res = await fetch(this.getCloudUrl('/api/db/snapshot'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision: 0, data })
@@ -189,7 +204,7 @@ const DB = {
   async mutateCloud(method, args) {
     if (!this.cloudEnabled || this._applyingCloudSnapshot) return null;
 
-    const res = await fetch('/api/db/mutate', {
+    const res = await fetch(this.getCloudUrl('/api/db/mutate'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ method, args })
@@ -206,7 +221,7 @@ const DB = {
   },
 
   async fetchCloudSnapshot() {
-    const res = await fetch('/api/db/snapshot', { cache: 'no-store' });
+    const res = await fetch(this.getCloudUrl('/api/db/snapshot'), { cache: 'no-store' });
     if (!res.ok) throw new Error(`Cloud snapshot fetch failed (${res.status})`);
     return await res.json();
   },
@@ -226,7 +241,7 @@ const DB = {
     if (!this.cloudEnabled || this._applyingCloudSnapshot) return;
 
     const data = await this.exportData();
-    const res = await fetch('/api/db/snapshot', {
+    const res = await fetch(this.getCloudUrl('/api/db/snapshot'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ revision: this.cloudRevision, data })
@@ -272,9 +287,9 @@ const DB = {
     if (await this.getSetting(migrationKey) === 'print-care-plus-2026-05') return;
 
     await this.db.settings.bulkPut([
-      { key: 'shopName', value: 'Print Care Plus' },
-      { key: 'shopAddress', value: 'No.05,\nSchool Road,\nSooriyawewa.' },
-      { key: 'shopPhone', value: '078 76000 17' },
+      { key: 'shopName', value: 'Supiri Karawala' },
+      { key: 'shopAddress', value: 'Daulagala Handassa' },
+      { key: 'shopPhone', value: '077 944 5144' },
       { key: migrationKey, value: 'print-care-plus-2026-05' }
     ]);
   },
@@ -983,9 +998,9 @@ const DB = {
 
     // Default settings
     await this.db.settings.bulkPut([
-      { key: 'shopName', value: 'Print Care Plus' },
-      { key: 'shopAddress', value: 'No.05,\nSchool Road,\nSooriyawewa.' },
-      { key: 'shopPhone', value: '078 76000 17' },
+      { key: 'shopName', value: 'Supiri Karawala' },
+      { key: 'shopAddress', value: 'Daulagala Handassa' },
+      { key: 'shopPhone', value: '077 944 5144' },
       { key: 'shopEmail', value: 'info@myshop.lk' },
       { key: 'receiptFooter', value: 'Thank You, Please Come Again!' },
       { key: 'taxRate', value: '0' },

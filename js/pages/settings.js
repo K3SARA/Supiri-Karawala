@@ -20,6 +20,7 @@ const SettingsPage = {
               <div class="settings-nav-item" data-section="tax">${Utils.icons.expenses} Tax Settings</div>
               <div class="settings-nav-item" data-section="users">${Utils.icons.customers} Users</div>
               <div class="settings-nav-item" data-section="backup">${Utils.icons.download} Backup</div>
+              <div class="settings-nav-item" data-section="cloud">${Utils.icons.refresh} Cloud Sync</div>
             </div>
           </div>
         </div>
@@ -91,9 +92,9 @@ const SettingsPage = {
 
       case 'printers': {
         let printers = [];
-        if (window.PrintCarePlus?.getPrinters) {
+        if (window.SupiriKarawala?.getPrinters) {
           try {
-            printers = await window.PrintCarePlus.getPrinters();
+            printers = await window.SupiriKarawala.getPrinters();
           } catch (e) {
             printers = [];
           }
@@ -109,13 +110,13 @@ const SettingsPage = {
         sc.innerHTML = `
           <div class="settings-section">
             <h4>Printer Settings</h4>
-            ${!window.PrintCarePlus?.getPrinters ? `
+            ${!window.SupiriKarawala?.getPrinters ? `
               <div class="alert-banner warning">
                 ${Utils.icons.warning}
                 <span>Printer selection is available in the desktop app only. Browser mode will use the normal print dialog.</span>
               </div>
             ` : ''}
-            ${window.PrintCarePlus?.getPrinters && printers.length === 0 ? `
+            ${window.SupiriKarawala?.getPrinters && printers.length === 0 ? `
               <div class="alert-banner warning">
                 ${Utils.icons.warning}
                 <span>No printers were reported by Windows. Check that your printers are installed and online.</span>
@@ -147,7 +148,7 @@ const SettingsPage = {
               <button class="btn btn-primary" id="savePrintersBtn">${Utils.icons.check} Save</button>
               <button class="btn btn-outline" id="refreshPrintersBtn">${Utils.icons.refresh} Refresh</button>
               <button class="btn btn-warning" id="testLabelPrinterBtn" ${printers.length ? '' : 'disabled'}>${Utils.icons.print} Test Label</button>
-              <button class="btn btn-warning" id="testCashDrawerBtn" ${printers.length && window.PrintCarePlus?.openCashDrawer ? '' : 'disabled'}>${Utils.icons.cash} Test Drawer</button>
+              <button class="btn btn-warning" id="testCashDrawerBtn" ${printers.length && window.SupiriKarawala?.openCashDrawer ? '' : 'disabled'}>${Utils.icons.cash} Test Drawer</button>
             </div>
           </div>
         `;
@@ -176,7 +177,7 @@ const SettingsPage = {
         document.getElementById('testCashDrawerBtn')?.addEventListener('click', async () => {
           await DB.setSetting('receiptPrinter', document.getElementById('setReceiptPrinter').value);
           try {
-            const result = await window.PrintCarePlus.openCashDrawer({
+            const result = await window.SupiriKarawala.openCashDrawer({
               deviceName: document.getElementById('setReceiptPrinter').value || undefined
             });
             Toast.success('Cash Drawer', result?.printer ? `Open command sent to ${result.printer}` : 'Open command sent');
@@ -249,7 +250,7 @@ const SettingsPage = {
           const json = JSON.stringify(data, null, 2);
           const blob = new Blob([json], { type: 'application/json' });
           const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-          a.download = `print-care-plus-backup-${Utils.today()}.json`; a.click();
+          a.download = `supiri-karawala-backup-${Utils.today()}.json`; a.click();
           Toast.success('Exported', 'Backup file downloaded');
         });
         document.getElementById('importDataBtn').addEventListener('click', () => {
@@ -272,6 +273,115 @@ const SettingsPage = {
           });
         });
         break;
+
+      case 'cloud': {
+        const cloudActiveNow = DB.cloudEnabled && DB.cloudInitialized;
+        const cloudEnabledSetting = settings.cloudEnabled === 'true';
+
+        sc.innerHTML = `
+          <div class="settings-section">
+            <h4>Remote Cloud Sync</h4>
+
+            <div class="alert-banner ${cloudActiveNow ? 'success' : (cloudEnabledSetting ? 'warning' : 'neutral')}" style="margin-bottom:20px">
+              ${cloudActiveNow
+                ? `${Utils.icons.check} <span><strong>Cloud Sync Active</strong> — This device is connected and syncing with the Railway database in real time.</span>`
+                : cloudEnabledSetting
+                  ? `${Utils.icons.warning} <span><strong>Cloud Sync Configured but Offline</strong> — The app could not reach the cloud server on startup. Running on local data. Check your URL or network.</span>`
+                  : `${Utils.icons.refresh} <span><strong>Local Mode</strong> — All data is stored locally on this device only. Enable cloud sync to share data across multiple devices.</span>`
+              }
+            </div>
+
+            <p style="margin-bottom:16px;color:var(--text-secondary);font-size:var(--font-size-sm)">
+              Cloud sync uses a Railway-hosted Node.js backend with PostgreSQL to keep all your devices in sync.
+              Every read and write goes through the remote API when cloud sync is active.
+            </p>
+
+            <div class="form-group" style="margin-bottom:16px">
+              <label class="checkbox-label">
+                <input type="checkbox" id="setCloudEnabled" ${cloudEnabledSetting ? 'checked' : ''}> Enable Cloud Sync
+              </label>
+            </div>
+
+            <div class="form-group" style="margin-bottom:16px">
+              <label class="form-label">Railway Server URL</label>
+              <input class="form-input" id="setCloudUrl" placeholder="https://your-app.up.railway.app" value="${settings.cloudUrl || ''}">
+              <p style="margin-top:6px;color:var(--text-secondary);font-size:var(--font-size-sm)">
+                Your Railway public domain — no trailing slash. Example: <code>https://supiri-karawala.up.railway.app</code>
+              </p>
+            </div>
+
+            <div class="form-group" style="margin-bottom:20px" id="connectionStatusContainer">
+              <!-- Connection test result appears here -->
+            </div>
+
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="saveCloudBtn">${Utils.icons.check} Save &amp; Restart</button>
+              <button class="btn btn-outline" id="testCloudConnectionBtn">${Utils.icons.refresh} Test Connection</button>
+              ${cloudActiveNow ? `<button class="btn btn-success" id="syncNowBtn">${Utils.icons.refresh} Sync Now</button>` : ''}
+            </div>
+
+            <div class="alert-banner danger" style="margin-top:20px">
+              ${Utils.icons.warning}
+              <span>After changing settings, the app will <strong>reload automatically</strong>. Make sure to save any open transactions first.</span>
+            </div>
+          </div>
+        `;
+
+        const testConnection = async () => {
+          const statusContainer = document.getElementById('connectionStatusContainer');
+          const rawUrl = document.getElementById('setCloudUrl').value.trim();
+          if (!rawUrl) {
+            statusContainer.innerHTML = `<div class="alert-banner warning">${Utils.icons.warning} <span>Please enter a Server URL first.</span></div>`;
+            return;
+          }
+          const cleanUrl = rawUrl.replace(/\/$/, '');
+          statusContainer.innerHTML = `<div class="alert-banner neutral">${Utils.icons.refresh} <span>Testing connection to <code>${cleanUrl}</code>…</span></div>`;
+
+          try {
+            const res = await fetch(`${cleanUrl}/api/health`, { cache: 'no-store' });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.database) {
+                statusContainer.innerHTML = `<div class="alert-banner success">${Utils.icons.check} <span><strong>Connection OK</strong> — Railway server is reachable and PostgreSQL is connected.</span></div>`;
+              } else {
+                statusContainer.innerHTML = `<div class="alert-banner warning">${Utils.icons.warning} <span>Server reachable but <strong>database is offline</strong>. Set <code>DATABASE_URL</code> in your Railway service variables.</span></div>`;
+              }
+            } else {
+              statusContainer.innerHTML = `<div class="alert-banner danger">${Utils.icons.warning} <span>Server returned HTTP <strong>${res.status}</strong>. Check your Railway deployment logs.</span></div>`;
+            }
+          } catch (err) {
+            statusContainer.innerHTML = `<div class="alert-banner danger">${Utils.icons.warning} <span>Could not reach server: <em>${Utils.escapeHtml(err.message)}</em>. Verify the URL and your network connection.</span></div>`;
+          }
+        };
+
+        document.getElementById('testCloudConnectionBtn').addEventListener('click', testConnection);
+
+        document.getElementById('saveCloudBtn').addEventListener('click', async () => {
+          const enabled = document.getElementById('setCloudEnabled').checked ? 'true' : 'false';
+          const rawUrl = document.getElementById('setCloudUrl').value.trim();
+          const cleanUrl = rawUrl.replace(/\/$/, '');
+          await DB.setSetting('cloudEnabled', enabled);
+          await DB.setSetting('cloudUrl', cleanUrl);
+          Toast.success('Saved', 'Cloud Sync settings updated. Reloading…');
+          setTimeout(() => window.location.reload(), 1500);
+        });
+
+        document.getElementById('syncNowBtn')?.addEventListener('click', async () => {
+          const btn = document.getElementById('syncNowBtn');
+          btn.disabled = true;
+          btn.textContent = 'Syncing…';
+          try {
+            await DB.syncToCloud();
+            Toast.success('Synced', 'Database pushed to cloud successfully.');
+          } catch (err) {
+            Toast.error('Sync Failed', err.message || 'Could not sync to cloud.');
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = `${Utils.icons.refresh} Sync Now`;
+          }
+        });
+        break;
+      }
     }
   },
 

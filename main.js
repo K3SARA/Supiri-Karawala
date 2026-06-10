@@ -7,7 +7,7 @@ let mainWindow;
 
 // Use a stable writable profile path for both dev and packaged app.
 const baseUserData = app.isPackaged
-  ? path.join(app.getPath('appData'), 'Print Care Plus')
+  ? path.join(app.getPath('appData'), 'Supiri Karawala')
   : path.join(__dirname, '.electron-userdata');
 const localCache = path.join(baseUserData, 'Cache');
 try {
@@ -24,7 +24,7 @@ function createWindow() {
     height: 900,
     minWidth: 1200,
     minHeight: 700,
-    title: 'Print Care Plus',
+    title: 'Supiri Karawala',
     icon: path.join(__dirname, 'assets', 'logo.png'),
     webPreferences: {
       nodeIntegration: false,

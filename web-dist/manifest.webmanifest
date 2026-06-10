@@ -1,7 +1,7 @@
 {
-  "name": "Print Care Plus",
-  "short_name": "Print Care Plus",
-  "description": "Offline Print Care Plus POS Software",
+  "name": "Supiri Karawala",
+  "short_name": "Supiri Karawala",
+  "description": "Offline Supiri Karawala POS Software",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

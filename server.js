@@ -38,10 +38,20 @@ function resolveFile(requestUrl) {
   return path.join(publicDir, 'index.html');
 }
 
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Max-Age': '86400'
+  };
+}
+
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store'
+    'Cache-Control': 'no-store',
+    ...corsHeaders()
   });
   res.end(JSON.stringify(body));
 }
@@ -478,9 +488,9 @@ function ensureDefaultUserAccounts(data) {
 
 function applyBusinessProfile(data) {
   if (getSettingValue(data, 'businessProfileVersion') === 'print-care-plus-2026-05') return null;
-  setSettingValue(data, 'shopName', 'Print Care Plus');
-  setSettingValue(data, 'shopAddress', 'No.05,\nSchool Road,\nSooriyawewa.');
-  setSettingValue(data, 'shopPhone', '078 76000 17');
+  setSettingValue(data, 'shopName', 'Supiri Karawala');
+  setSettingValue(data, 'shopAddress', 'Daulagala Handassa');
+  setSettingValue(data, 'shopPhone', '077 944 5144');
   setSettingValue(data, 'businessProfileVersion', 'print-care-plus-2026-05');
   return null;
 }
@@ -648,9 +658,15 @@ async function handleApi(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (!['GET', 'HEAD'].includes(req.method)) {
-    if (await handleApi(req, res)) return;
-    res.writeHead(405, { Allow: 'GET, HEAD' });
+  // Handle CORS preflight (OPTIONS) for all routes
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, corsHeaders());
+    res.end();
+    return;
+  }
+
+  if (!['GET', 'HEAD', 'POST', 'PUT', 'DELETE'].includes(req.method)) {
+    res.writeHead(405, { Allow: 'GET, HEAD, POST, PUT, DELETE, OPTIONS', ...corsHeaders() });
     res.end('Method Not Allowed');
     return;
   }
@@ -665,7 +681,7 @@ const server = http.createServer(async (req, res) => {
 
   const filePath = resolveFile(req.url);
   if (!filePath || !fs.existsSync(filePath)) {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...corsHeaders() });
     res.end('Not Found');
     return;
   }
@@ -673,7 +689,8 @@ const server = http.createServer(async (req, res) => {
   const ext = path.extname(filePath).toLowerCase();
   res.writeHead(200, {
     'Content-Type': mimeTypes[ext] || 'application/octet-stream',
-    'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable'
+    'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+    ...corsHeaders()
   });
 
   if (req.method === 'HEAD') {
@@ -685,5 +702,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`Print Care Plus web app listening on port ${port}`);
+  console.log(`Supiri Karawala web app listening on port ${port}`);
 });

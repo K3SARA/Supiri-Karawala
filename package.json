@@ -1,7 +1,7 @@
 {
-  "name": "print-care-plus",
+  "name": "supiri-karawala",
   "version": "1.0.0",
-  "description": "Offline Print Care Plus POS Software",
+  "description": "Offline Supiri Karawala POS Software",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -11,7 +11,7 @@
     "serve:web": "npx serve web-dist",
     "dist": "electron-builder --win nsis"
   },
-  "author": "Print Care Plus",
+  "author": "Supiri Karawala",
   "license": "MIT",
   "dependencies": {
     "chart.js": "^4.4.7",
@@ -24,8 +24,8 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.printcareplus.pos",
-    "productName": "Print Care Plus",
+    "appId": "com.supirikarawala.pos",
+    "productName": "Supiri Karawala",
     "artifactName": "${productName} Setup ${version}.${ext}",
     "directories": {
       "output": "dist"

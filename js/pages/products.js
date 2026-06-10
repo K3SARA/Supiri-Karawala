@@ -297,10 +297,10 @@ const ProductsPage = {
     const html = this.printDocumentHtml(printRoot.innerHTML);
 
     try {
-      if (window.PrintCarePlus?.printLabel) {
+      if (window.SupiriKarawala?.printLabel) {
         const labelPrinter = await DB.getSetting('labelPrinter');
         const result = await Promise.race([
-          window.PrintCarePlus.printLabel(html, { deviceName: labelPrinter || undefined }),
+          window.SupiriKarawala.printLabel(html, { deviceName: labelPrinter || undefined }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Print timed out')), 10000))
         ]);
         Toast.success('Printed', result?.printer ? `Barcode sent to ${result.printer}` : 'Barcode sent to printer');

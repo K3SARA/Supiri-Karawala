@@ -103,9 +103,9 @@ function writeIndex() {
 
 function writeManifest() {
   const manifest = {
-    name: 'Print Care Plus',
-    short_name: 'Print Care Plus',
-    description: 'Offline Print Care Plus POS Software',
+    name: 'Supiri Karawala',
+    short_name: 'Supiri Karawala',
+    description: 'Offline Supiri Karawala POS Software',
     start_url: './',
     scope: './',
     display: 'standalone',
@@ -138,7 +138,7 @@ function writeServiceWorker() {
     ...listFiles(path.join(outDir, 'vendor')).map((file) => `vendor/${file}`),
   ];
 
-  const sw = `const CACHE_NAME = 'print-care-plus-v2';
+  const sw = `const CACHE_NAME = 'supiri-karawala-v2';
 const ASSETS = ${JSON.stringify(assets, null, 2)};
 
 self.addEventListener('install', (event) => {

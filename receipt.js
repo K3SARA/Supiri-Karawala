@@ -97,7 +97,6 @@ const Receipt = {
         <td class="right">${Utils.currencyPlain(item.quantity * item.price - (item.discount || 0))}</td>
       </tr>
     `).join('') || '<tr><td colspan="3" class="center empty-row">Returned</td></tr>';
-    const sizeAdjust = width === '58' ? 0 : 2;
 
     return `
       <style>
@@ -107,7 +106,7 @@ const Receipt = {
           padding: ${width === '58' ? '3mm' : '4mm'};
           color: #000;
           font-family: Arial, Helvetica, sans-serif;
-          font-size: ${width === '58' ? '10.5px' : `${12 + sizeAdjust}px`};
+          font-size: ${width === '58' ? '10.5px' : '12px'};
           line-height: 1.28;
         }
         .thermal-receipt * { box-sizing: border-box; }
@@ -121,18 +120,18 @@ const Receipt = {
         }
         .thermal-receipt .shop-title {
           font-family: Georgia, 'Times New Roman', serif;
-          font-size: ${width === '58' ? '21px' : `${27 + sizeAdjust}px`};
+          font-size: ${width === '58' ? '21px' : '27px'};
           font-weight: 700;
           line-height: 1;
           margin-top: 1px;
         }
         .thermal-receipt .shop-subtitle {
           font-weight: 700;
-          font-size: ${width === '58' ? '10px' : `${12 + sizeAdjust}px`};
+          font-size: ${width === '58' ? '10px' : '12px'};
           margin-top: 1px;
         }
         .thermal-receipt .shop-meta {
-          font-size: ${width === '58' ? '9px' : `${10.5 + sizeAdjust}px`};
+          font-size: ${width === '58' ? '9px' : '10.5px'};
           margin-top: 3px;
         }
         .thermal-receipt .line {
@@ -172,17 +171,17 @@ const Receipt = {
         .thermal-receipt .empty-row { padding: 6px 0; }
         .thermal-receipt .summary { padding: 0 2px; }
         .thermal-receipt .summary .label { font-weight: 700; }
-        .thermal-receipt .grand { font-weight: 800; font-size: ${width === '58' ? '12px' : `${14 + sizeAdjust}px`}; }
+        .thermal-receipt .grand { font-weight: 800; font-size: ${width === '58' ? '12px' : '14px'}; }
         .thermal-receipt .footer {
           text-align: center;
           margin-top: 6px;
           font-weight: 700;
-          font-size: ${width === '58' ? '10px' : `${12 + sizeAdjust}px`};
+          font-size: ${width === '58' ? '10px' : '12px'};
         }
         .thermal-receipt .powered {
           text-align: center;
           margin-top: 4px;
-          font-size: ${width === '58' ? '8.5px' : `${10 + sizeAdjust}px`};
+          font-size: ${width === '58' ? '8.5px' : '10px'};
           font-weight: 700;
         }
         .thermal-receipt #receiptBarcode svg {
@@ -374,8 +373,8 @@ const Receipt = {
         const receiptWidth = await DB.getSetting('receiptWidth');
         JsBarcode(svg, sale.invoiceNo, {
           format: 'CODE128',
-          width: receiptWidth === '58' ? 0.5 : 0.8,
-          height: receiptWidth === '58' ? 24 : 34,
+          width: receiptWidth === '58' ? 0.42 : 0.58,
+          height: receiptWidth === '58' ? 20 : 24,
           fontSize: receiptWidth === '58' ? 6 : 7,
           margin: 0,
           displayValue: true

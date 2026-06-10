@@ -1,4 +1,4 @@
-const CACHE_NAME = 'print-care-plus-v2';
+const CACHE_NAME = 'supiri-karawala-v2';
 const ASSETS = [
   "./",
   "index.html",

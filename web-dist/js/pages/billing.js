@@ -563,10 +563,10 @@ const BillingPage = {
   },
 
   async openCashDrawer() {
-    if (!window.PrintCarePlus?.openCashDrawer) return;
+    if (!window.SupiriKarawala?.openCashDrawer) return;
     try {
       const receiptPrinter = await DB.getSetting('receiptPrinter');
-      await window.PrintCarePlus.openCashDrawer({ deviceName: receiptPrinter || undefined });
+      await window.SupiriKarawala.openCashDrawer({ deviceName: receiptPrinter || undefined });
     } catch (err) {
       console.warn('Cash drawer did not open:', err);
       Toast.warning('Cash Drawer', err.message || 'Could not open the cash drawer');

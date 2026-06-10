@@ -26,12 +26,12 @@ const Sidebar = {
     sidebar.innerHTML = `
       <div class="sidebar-brand">
         <div class="sidebar-brand-icon">
-          <img src="assets/logo.png" alt="Print Care Plus logo" class="sidebar-brand-logo" onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
-          <span class="sidebar-logo-fallback hidden">PC+</span>
+          <img src="assets/logo.png" alt="Supiri Karawala logo" class="sidebar-brand-logo" onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
+          <span class="sidebar-logo-fallback hidden">SK</span>
         </div>
         <div class="sidebar-brand-text">
-          <h2>Print Care Plus</h2>
-          <span>Printing Solutions</span>
+          <h2>Supiri Karawala</h2>
+          <span>Premium Dried Fish</span>
         </div>
       </div>
 
