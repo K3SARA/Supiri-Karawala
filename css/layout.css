@@ -111,9 +111,15 @@
   display: flex;
   flex-direction: column;
   z-index: var(--z-sidebar);
-  transition: width var(--transition-base);
+  transition: width var(--transition-base), min-width var(--transition-base);
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.sidebar.collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -653,7 +659,7 @@
 
 /* ===== HAMBURGER BUTTON ===== */
 .hamburger-btn {
-  display: none;
+  display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
@@ -724,11 +730,6 @@
 
 /* ===== MOBILE (≤768px) ===== */
 @media (max-width: 768px) {
-
-  /* Show hamburger button */
-  .hamburger-btn {
-    display: flex;
-  }
 
   /* Sidebar: hidden off-screen by default */
   .sidebar {

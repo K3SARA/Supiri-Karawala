@@ -6,6 +6,13 @@ const Sidebar = {
     const sidebar = document.getElementById('sidebar');
     const user = App.currentUser || {};
 
+    // Restore desktop collapsed state
+    if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
+      sidebar.classList.add('collapsed');
+    } else {
+      sidebar.classList.remove('collapsed');
+    }
+
     const menuItems = [
       { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
       { id: 'billing', label: 'Billing', icon: 'billing' },
@@ -100,6 +107,26 @@ const Sidebar = {
     document.querySelectorAll('.sidebar-menu-item').forEach(el => {
       el.classList.toggle('active', el.dataset.page === page);
     });
+  },
+
+  toggle() {
+    if (window.innerWidth <= 768) {
+      this.toggleMobile();
+    } else {
+      this.toggleDesktop();
+    }
+  },
+
+  toggleDesktop() {
+    const sidebar = document.getElementById('sidebar');
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    if (isCollapsed) {
+      sidebar.classList.remove('collapsed');
+      localStorage.setItem('sidebarCollapsed', 'false');
+    } else {
+      sidebar.classList.add('collapsed');
+      localStorage.setItem('sidebarCollapsed', 'true');
+    }
   },
 
   toggleMobile() {

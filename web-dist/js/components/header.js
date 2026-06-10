@@ -53,9 +53,9 @@ const Header = {
       }
     });
 
-    // Hamburger toggle for mobile
+    // Hamburger toggle
     document.getElementById('hamburgerBtn').addEventListener('click', () => {
-      Sidebar.toggleMobile();
+      Sidebar.toggle();
     });
 
     // Notification click
