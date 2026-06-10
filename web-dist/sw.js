@@ -1,4 +1,4 @@
-const CACHE_NAME = 'supiri-karawala-v2';
+const CACHE_NAME = 'supiri-karawala-v3';
 const ASSETS = [
   "./",
   "index.html",
