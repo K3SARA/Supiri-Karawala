@@ -188,7 +188,9 @@ const DB = {
       if (typeof this[name] !== 'function') return;
       const original = this[name].bind(this);
       this[name] = async (...args) => {
-        await this.pullFromCloud();
+        try { await this.pullFromCloud(); } catch (e) {
+          console.warn(`pullFromCloud failed for ${name}, using local data:`, e.message);
+        }
         return original(...args);
       };
     });
