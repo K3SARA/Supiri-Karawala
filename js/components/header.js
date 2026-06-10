@@ -7,6 +7,9 @@ const Header = {
 
     header.innerHTML = `
       <div class="header-left">
+        <button class="hamburger-btn" id="hamburgerBtn" aria-label="Toggle menu">
+          <span></span><span></span><span></span>
+        </button>
         <div class="header-greeting">
           <span class="header-date">${Utils.fullDate()}</span>
           <span class="header-welcome">${Utils.greeting()}, ${user.name || 'User'}!</span>
@@ -48,6 +51,11 @@ const Header = {
           }, 100);
         }
       }
+    });
+
+    // Hamburger toggle for mobile
+    document.getElementById('hamburgerBtn').addEventListener('click', () => {
+      Sidebar.toggleMobile();
     });
 
     // Notification click

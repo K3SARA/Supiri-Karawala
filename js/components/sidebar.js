@@ -72,6 +72,7 @@ const Sidebar = {
           return;
         }
         App.navigate(page);
+        this.closeMobile(); // auto-close sidebar on mobile after nav
       });
     });
 
@@ -99,6 +100,33 @@ const Sidebar = {
     document.querySelectorAll('.sidebar-menu-item').forEach(el => {
       el.classList.toggle('active', el.dataset.page === page);
     });
+  },
+
+  toggleMobile() {
+    const sidebar = document.getElementById('sidebar');
+    const isOpen = sidebar.classList.contains('mobile-open');
+    if (isOpen) {
+      this.closeMobile();
+    } else {
+      sidebar.classList.add('mobile-open');
+      // Create overlay
+      let overlay = document.getElementById('sidebarOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'sidebarOverlay';
+        overlay.className = 'sidebar-overlay';
+        overlay.addEventListener('click', () => this.closeMobile());
+        document.body.appendChild(overlay);
+      }
+      overlay.classList.add('visible');
+    }
+  },
+
+  closeMobile() {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.remove('mobile-open');
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) overlay.classList.remove('visible');
   },
 
   async updateLowStockBadge() {
