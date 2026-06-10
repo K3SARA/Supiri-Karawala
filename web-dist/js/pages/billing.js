@@ -52,10 +52,19 @@ const BillingPage = {
           </div>
 
           <div class="product-grid" id="billingProductGrid"></div>
+
+          <!-- Floating cart button for mobile -->
+          <button class="floating-cart-btn" id="mobileCartToggleBtn" aria-label="View cart">
+            ${Utils.icons.billing}
+            <span class="floating-cart-badge" id="mobileCartCountBadge">0</span>
+          </button>
         </div>
 
-        <div class="order-panel">
+        <div class="order-panel" id="orderPanel">
           <div class="order-panel-header">
+            <button class="btn-close-order-panel" id="closeOrderPanelBtn" aria-label="Close cart">
+              ${Utils.icons.close}
+            </button>
             <h3>Order Summary</h3>
             <button class="btn btn-sm btn-outline" id="clearCartBtn">${Utils.icons.trash} Clear</button>
           </div>
@@ -191,8 +200,12 @@ const BillingPage = {
             <button class="order-item-remove" data-cart-action="remove" data-idx="${idx}">${Utils.icons.close}</button>
           </div>
         </div>
-      `).join('');
     }
+
+    // Update mobile cart badge count
+    const totalQty = this.cart.reduce((sum, item) => sum + item.quantity, 0);
+    const badge = document.getElementById('mobileCartCountBadge');
+    if (badge) badge.textContent = totalQty;
 
     this.updateTotals();
   },
@@ -484,6 +497,23 @@ const BillingPage = {
       if (e.key === 'F9') { e.preventDefault(); barcodeInput.focus(); }
     };
     document.addEventListener('keydown', self._keyHandler);
+
+    // Mobile cart panel toggling
+    const mobileCartToggleBtn = document.getElementById('mobileCartToggleBtn');
+    const closeOrderPanelBtn = document.getElementById('closeOrderPanelBtn');
+    const orderPanel = document.getElementById('orderPanel');
+
+    if (mobileCartToggleBtn && orderPanel) {
+      mobileCartToggleBtn.addEventListener('click', () => {
+        orderPanel.classList.add('mobile-active');
+      });
+    }
+
+    if (closeOrderPanelBtn && orderPanel) {
+      closeOrderPanelBtn.addEventListener('click', () => {
+        orderPanel.classList.remove('mobile-active');
+      });
+    }
   },
 
   async placeOrder() {
@@ -614,6 +644,13 @@ const BillingPage = {
     document.querySelector('.payment-method-btn[data-method="cash"]').classList.add('active');
     this.renderCart();
     this.renderProducts();
+    
+    // Close order panel on mobile
+    const orderPanel = document.getElementById('orderPanel');
+    if (orderPanel) {
+      orderPanel.classList.remove('mobile-active');
+    }
+    
     document.getElementById('barcodeInput').focus();
   }
 };

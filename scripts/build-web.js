@@ -138,7 +138,7 @@ function writeServiceWorker() {
     ...listFiles(path.join(outDir, 'vendor')).map((file) => `vendor/${file}`),
   ];
 
-  const sw = `const CACHE_NAME = 'supiri-karawala-v3';
+  const sw = `const CACHE_NAME = 'supiri-karawala-v4';
 const ASSETS = ${JSON.stringify(assets, null, 2)};
 
 self.addEventListener('install', (event) => {
