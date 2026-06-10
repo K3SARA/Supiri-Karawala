@@ -144,6 +144,32 @@ const SettingsPage = {
                 ${printerOptions}
               </select>
             </div>
+            <div class="form-group" style="margin-bottom:16px">
+              <label class="form-label">Label Size</label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+                <button class="btn btn-sm btn-outline label-size-preset" data-w="50" data-h="30">50×30mm</button>
+                <button class="btn btn-sm btn-outline label-size-preset" data-w="57" data-h="32">57×32mm</button>
+                <button class="btn btn-sm btn-outline label-size-preset" data-w="38" data-h="25">38×25mm</button>
+                <button class="btn btn-sm btn-outline label-size-preset" data-w="100" data-h="50">100×50mm</button>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="number" class="form-input" id="setLabelWidth" min="20" max="200" step="1" value="${settings.labelWidth || '50'}" style="width:70px"> mm wide &times;
+                <input type="number" class="form-input" id="setLabelHeight" min="15" max="200" step="1" value="${settings.labelHeight || '30'}" style="width:70px"> mm tall
+              </div>
+              <p style="margin-top:6px;color:var(--text-secondary);font-size:var(--font-size-sm)">Match the label roll loaded in your thermal printer. Zebra ZD230 standard stock = 57×32mm.</p>
+            </div>
+            <div class="form-group" style="margin-bottom:16px">
+              <label class="form-label">Label Columns</label>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:4px">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="radio" name="labelColumns" value="1" ${settings.labelColumns !== '2' ? 'checked' : ''}> Single — one label per strip
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="radio" name="labelColumns" value="2" ${settings.labelColumns === '2' ? 'checked' : ''}> Double — two labels side by side
+                </label>
+              </div>
+              <p style="margin-top:6px;color:var(--text-secondary);font-size:var(--font-size-sm)">Use "Double" when the roll has two side-by-side columns (e.g. 100mm paper split into two 50mm labels). Set the label width above to the width of one column.</p>
+            </div>
             <div style="display:flex;gap:12px">
               <button class="btn btn-primary" id="savePrintersBtn">${Utils.icons.check} Save</button>
               <button class="btn btn-outline" id="refreshPrintersBtn">${Utils.icons.refresh} Refresh</button>
@@ -157,20 +183,35 @@ const SettingsPage = {
         document.getElementById('setReceiptPrinter').value = settings.receiptPrinter || '';
         document.getElementById('setA4Printer').value = settings.a4Printer || '';
 
+        document.querySelectorAll('.label-size-preset').forEach(btn => {
+          btn.addEventListener('click', () => {
+            document.getElementById('setLabelWidth').value = btn.dataset.w;
+            document.getElementById('setLabelHeight').value = btn.dataset.h;
+          });
+        });
+
         document.getElementById('savePrintersBtn').addEventListener('click', async () => {
           await DB.setSetting('labelPrinter', document.getElementById('setLabelPrinter').value);
           await DB.setSetting('receiptPrinter', document.getElementById('setReceiptPrinter').value);
           await DB.setSetting('a4Printer', document.getElementById('setA4Printer').value);
+          await DB.setSetting('labelWidth', document.getElementById('setLabelWidth').value);
+          await DB.setSetting('labelHeight', document.getElementById('setLabelHeight').value);
+          const colsEl = document.querySelector('input[name="labelColumns"]:checked');
+          await DB.setSetting('labelColumns', colsEl ? colsEl.value : '1');
           Toast.success('Saved', 'Printer settings updated');
         });
         document.getElementById('refreshPrintersBtn').addEventListener('click', () => this.render());
         document.getElementById('testLabelPrinterBtn')?.addEventListener('click', async () => {
           await DB.setSetting('labelPrinter', document.getElementById('setLabelPrinter').value);
-          if (window.ProductsPage?.printBarcodeLabel) {
+          if (typeof ProductsPage !== 'undefined' && ProductsPage.printBarcodeLabel) {
+            const today = new Date().toISOString().split('T')[0];
+            const nextYear = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             await ProductsPage.printBarcodeLabel({
               name: 'Test Label',
               barcode: '123456789012',
-              sellingPrice: 0
+              sellingPrice: 250,
+              mfgDate: today,
+              expDate: nextYear
             });
           }
         });

@@ -72,11 +72,14 @@ ipcMain.handle('printers:list', async () => {
 
 ipcMain.handle('labels:print', async (_event, html, options = {}) => {
   const printers = mainWindow ? await mainWindow.webContents.getPrintersAsync() : [];
-  const labelPrinter = printers.find((printer) =>
-    /label|barcode|sticker|thermal|zebra|dymo|brother|xprinter|pos/i.test(printer.name || '')
-  );
+  const labelPrinter = printers.find((printer) => {
+    const text = `${printer.name || ''} ${printer.description || ''}`;
+    return /label|barcode|sticker|thermal|zebra|zdesigner|dymo|brother|xprinter|pos/i.test(text);
+  });
   const defaultPrinter = printers.find((printer) => printer.isDefault);
   const deviceName = options.deviceName || labelPrinter?.name || defaultPrinter?.name;
+  console.log('[labels:print] printers found:', printers.map(p => `${p.name}${p.isDefault ? ' [DEFAULT]' : ''}`));
+  console.log('[labels:print] selected:', deviceName || '(none)');
 
   const labelWindow = new BrowserWindow({
     show: false,
@@ -90,13 +93,22 @@ ipcMain.handle('labels:print', async (_event, html, options = {}) => {
 
   try {
     await labelWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    // Give Chromium one tick to finish layout after load before printing
+    await new Promise(r => setTimeout(r, 100));
+    const labelWMm = parseFloat(options.labelW) || 50;
+    const labelHMm = parseFloat(options.labelH) || 30;
+    const labelCols = Math.max(1, parseInt(options.labelColumns) || 1);
     await new Promise((resolve, reject) => {
       labelWindow.webContents.print(
         {
           silent: true,
           printBackground: true,
           deviceName: deviceName || undefined,
-          margins: { marginType: 'none' }
+          margins: { marginType: 'none' },
+          // pageSize in microns tells the Windows spooler/driver the exact paper dimensions.
+          // Without this the spooler defaults to A4/Letter, which causes Zebra drivers to
+          // hold or discard the job silently because the paper size doesn't match the label stock.
+          pageSize: { width: Math.round(labelWMm * labelCols * 1000), height: Math.round(labelHMm * 1000) }
         },
         (success, failureReason) => {
           if (success) resolve();

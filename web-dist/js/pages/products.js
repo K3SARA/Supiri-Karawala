@@ -190,7 +190,16 @@ const ProductsPage = {
     `;
   },
 
-  printDocumentHtml(labelBody) {
+  printDocumentHtml(labelBody, labelW = 50, labelH = 30, columns = 1) {
+    const cols = Math.max(1, Math.min(4, columns));
+    const totalW = labelW * cols;
+    const svgW = Math.max(20, labelW - 8);
+    const svgH = Math.max(8, Math.floor(labelH * 0.4));
+    const namePx = Math.max(7, Math.round(labelH * 0.30));
+    const codePx = Math.max(6, Math.round(labelH * 0.27));
+    const pricePx = Math.max(8, Math.round(labelH * 0.33));
+    // Repeat the label for each column; duplicate IDs are fine — SVG is already rendered inline
+    const repeatedBody = Array.from({ length: cols }, () => labelBody).join('');
     return `
       <!DOCTYPE html>
       <html>
@@ -198,20 +207,29 @@ const ProductsPage = {
         <meta charset="UTF-8">
         <title>Barcode Label</title>
         <style>
-          @page { size: 50mm 30mm; margin: 0; }
-          html, body {
-            width: 50mm;
-            height: 30mm;
+          @page { size: ${totalW}mm ${labelH}mm; margin: 0; }
+          html {
+            width: ${totalW}mm;
+            height: ${labelH}mm;
+            margin: 0;
+            padding: 0;
+          }
+          body {
+            width: ${totalW}mm;
+            height: ${labelH}mm;
             margin: 0;
             padding: 0;
             background: #fff;
             color: #000;
             font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: row;
           }
           .barcode-label {
             box-sizing: border-box;
-            width: 50mm;
-            height: 30mm;
+            flex: 0 0 ${labelW}mm;
+            width: ${labelW}mm;
+            height: ${labelH}mm;
             padding: 2mm 3mm;
             display: flex;
             flex-direction: column;
@@ -221,31 +239,31 @@ const ProductsPage = {
           }
           .barcode-label-name {
             width: 100%;
-            font-size: 9px;
+            font-size: ${namePx}px;
             font-weight: 700;
             text-align: center;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          #productBarcodeSvg {
-            width: 42mm;
-            height: 12mm;
+          .barcode-label svg {
+            width: ${svgW}mm;
+            height: ${svgH}mm;
             margin-top: 1mm;
           }
           .barcode-label-code {
-            font-size: 8px;
+            font-size: ${codePx}px;
             letter-spacing: 1px;
             margin-top: 1mm;
           }
           .barcode-label-price {
-            font-size: 10px;
+            font-size: ${pricePx}px;
             font-weight: 700;
             margin-top: 1mm;
           }
         </style>
       </head>
-      <body>${labelBody}</body>
+      <body>${repeatedBody}</body>
       </html>
     `;
   },
@@ -294,13 +312,16 @@ const ProductsPage = {
     const printRoot = document.createElement('div');
     printRoot.innerHTML = this.labelHtml(product);
     this.renderBarcodeSvg(printRoot, product.barcode);
-    const html = this.printDocumentHtml(printRoot.innerHTML);
+    const labelW = parseFloat(await DB.getSetting('labelWidth')) || 50;
+    const labelH = parseFloat(await DB.getSetting('labelHeight')) || 30;
+    const labelColumns = parseInt(await DB.getSetting('labelColumns')) || 1;
+    const html = this.printDocumentHtml(printRoot.innerHTML, labelW, labelH, labelColumns);
 
     try {
       if (window.SupiriKarawala?.printLabel) {
         const labelPrinter = await DB.getSetting('labelPrinter');
         const result = await Promise.race([
-          window.SupiriKarawala.printLabel(html, { deviceName: labelPrinter || undefined }),
+          window.SupiriKarawala.printLabel(html, { deviceName: labelPrinter || undefined, labelW, labelH, labelColumns }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Print timed out')), 10000))
         ]);
         Toast.success('Printed', result?.printer ? `Barcode sent to ${result.printer}` : 'Barcode sent to printer');
@@ -323,6 +344,9 @@ const ProductsPage = {
 
   printBarcodeInFrame(html) {
     return new Promise((resolve, reject) => {
+      const blob = new Blob([html], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+
       const iframe = document.createElement('iframe');
       iframe.title = 'Barcode Print Frame';
       iframe.style.position = 'fixed';
@@ -337,6 +361,7 @@ const ProductsPage = {
       const cleanup = () => {
         if (cleaned) return;
         cleaned = true;
+        URL.revokeObjectURL(blobUrl);
         setTimeout(() => iframe.remove(), 500);
         resolve();
       };
@@ -352,21 +377,14 @@ const ProductsPage = {
             setTimeout(cleanup, 1500);
           }, 150);
         } catch (err) {
+          URL.revokeObjectURL(blobUrl);
           iframe.remove();
           reject(err);
         }
       };
 
+      iframe.src = blobUrl;
       document.body.appendChild(iframe);
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!doc) {
-        iframe.remove();
-        reject(new Error('Could not create print frame'));
-        return;
-      }
-      doc.open();
-      doc.write(html);
-      doc.close();
     });
   },
 

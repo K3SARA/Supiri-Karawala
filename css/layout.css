@@ -867,3 +867,44 @@
   }
 }
 
+/* ===== ANDROID / MOBILE TOUCH FIXES ===== */
+@media (max-width: 768px) {
+  /* Prevent Android/iOS auto-zoom on input focus (triggers when font-size < 16px) */
+  input.form-input,
+  select.form-select,
+  textarea.form-textarea {
+    font-size: 16px !important;
+  }
+
+  /* Larger touch targets for buttons and interactive elements */
+  .btn {
+    min-height: 44px;
+  }
+
+  .btn-sm {
+    min-height: 36px;
+  }
+
+  /* Sidebar nav items easier to tap */
+  .sidebar-nav-item {
+    padding: var(--space-3) var(--space-4);
+    min-height: 48px;
+  }
+
+  /* Table rows easier to tap on mobile */
+  .data-table td,
+  .data-table th {
+    padding: 10px 8px;
+  }
+
+  /* Prevent text selection on tap (buttons/cards feel native) */
+  .btn,
+  .sidebar-nav-item,
+  .stat-card,
+  .product-card {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+

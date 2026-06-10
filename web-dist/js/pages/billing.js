@@ -200,6 +200,7 @@ const BillingPage = {
             <button class="order-item-remove" data-cart-action="remove" data-idx="${idx}">${Utils.icons.close}</button>
           </div>
         </div>
+      `).join('');
     }
 
     // Update mobile cart badge count
