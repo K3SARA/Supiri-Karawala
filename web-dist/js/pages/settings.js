@@ -496,8 +496,9 @@ const SettingsPage = {
           btn.disabled = true;
           btn.textContent = 'Syncing…';
           try {
-            await DB.syncToCloud();
-            Toast.success('Synced', 'Database pushed to cloud successfully.');
+            await DB.processSyncQueue();
+            await DB.pollCloudRevision();
+            Toast.success('Synced', 'Database synchronized successfully.');
           } catch (err) {
             Toast.error('Sync Failed', err.message || 'Could not sync to cloud.');
           } finally {

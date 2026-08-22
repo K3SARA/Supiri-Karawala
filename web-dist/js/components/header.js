@@ -14,6 +14,10 @@ const Header = {
           <span class="header-date">${Utils.fullDate()}</span>
           <span class="header-welcome">${Utils.greeting()}, ${user.name || 'User'}!</span>
         </div>
+        <div id="syncStatusIndicator" style="display:none; align-items:center; margin-left: 16px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; background: var(--bg-secondary); color: var(--text-secondary);">
+          <span id="syncStatusIcon" style="margin-right: 6px">☁️</span>
+          <span id="syncStatusText">Synced</span>
+        </div>
       </div>
       <div class="header-right">
         <div class="header-search">
@@ -84,6 +88,46 @@ const Header = {
     });
 
     this.updateNotificationDot();
+    this.bindSyncStatus();
+  },
+
+  bindSyncStatus() {
+    const indicator = document.getElementById('syncStatusIndicator');
+    const icon = document.getElementById('syncStatusIcon');
+    const text = document.getElementById('syncStatusText');
+    if (!indicator || !DB.cloudEnabled) return;
+    
+    indicator.style.display = 'flex';
+
+    window.addEventListener('sync-status-change', (e) => {
+      const pending = e.detail.pending || 0;
+      const pulled = e.detail.pulled || false;
+      
+      if (pending > 0) {
+        indicator.style.background = '#fffbeb';
+        indicator.style.color = '#92400e';
+        icon.textContent = '⏳';
+        text.textContent = `${pending} pending`;
+      } else if (pulled) {
+        indicator.style.background = '#f0fdf4';
+        indicator.style.color = 'var(--success-dark)';
+        icon.textContent = '🔄';
+        text.textContent = 'Updated';
+        setTimeout(() => {
+          if (text.textContent === 'Updated') {
+             indicator.style.background = 'var(--bg-secondary)';
+             indicator.style.color = 'var(--text-secondary)';
+             icon.textContent = '☁️';
+             text.textContent = 'Synced';
+          }
+        }, 3000);
+      } else {
+        indicator.style.background = 'var(--bg-secondary)';
+        indicator.style.color = 'var(--text-secondary)';
+        icon.textContent = '☁️';
+        text.textContent = 'Synced';
+      }
+    });
   },
 
   async updateNotificationDot() {

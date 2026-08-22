@@ -87,7 +87,7 @@ const ProductsPage = {
           <div class="form-row" style="margin-bottom:16px">
             <div class="form-group">
               <label class="form-label" id="pStockLabel">Stock Quantity</label>
-              <input type="number" class="form-input" id="pStock" value="${product?.stock ?? 0}" min="0" step="any">
+              <input type="number" class="form-input" id="pStock" value="${(product?.packetSizeGrams > 0 && product?.stock) ? (product.stock / 1000) : (product?.stock ?? 0)}" min="0" step="any">
               <span id="pStockNote" style="font-size:11px;color:var(--primary);margin-top:3px;display:block;min-height:16px"></span>
             </div>
             <div class="form-group"><label class="form-label">Reorder Level</label>
@@ -95,7 +95,7 @@ const ProductsPage = {
           </div>
           <div class="form-row" style="margin-bottom:16px">
             <div class="form-group">
-              <label class="form-label">Packet Size <span style="font-weight:400;color:var(--text-secondary)">(grams — optional)</span></label>
+              <label class="form-label">Packet Size <span style="background:var(--primary);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;vertical-align:middle;letter-spacing:0.5px">GRAMS</span></label>
               <input type="number" class="form-input" id="pPacketSize" value="${product?.packetSizeGrams || ''}" min="0.001" step="any" placeholder="e.g. 100 for 100g packets">
               <span style="font-size:11px;color:var(--text-secondary);margin-top:3px;display:block">Bulk items sold by weight. Leave empty for regular unit items.</span>
             </div>
@@ -108,10 +108,9 @@ const ProductsPage = {
               <input type="date" class="form-input" id="pExpDate" value="${product?.expDate || ''}"></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label class="form-label">Weight / Volume</label>
-              <input class="form-input" id="pWeight" placeholder="e.g. 250ml, 1kg" value="${product?.weight || ''}"></div>
             <div class="form-group"><label class="form-label">Batch No</label>
               <input class="form-input" id="pBatchNo" placeholder="e.g. B001" value="${product?.batchNo || ''}"></div>
+            <div class="form-group"></div>
           </div>
         </form>
       `,
@@ -130,10 +129,11 @@ const ProductsPage = {
     const _updateStockLabel = () => {
       const ps = parseFloat(_pPacketSize.value) || 0;
       if (ps > 0) {
-        _pStockLabel.innerHTML = 'Stock <span style="background:var(--primary);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;vertical-align:middle;letter-spacing:0.5px">GRAMS</span>';
-        _pStock.placeholder = 'e.g. 400000 for 400kg';
-        const g = parseFloat(_pStock.value) || 0;
-        _pStockNote.textContent = g > 0 ? `${(g / 1000).toFixed(2)} kg  ·  ${(g / ps).toFixed(2)} packets` : '';
+        _pStockLabel.textContent = 'Stock Quantity (KG)';
+        _pStock.placeholder = 'e.g. 400 for 400kg';
+        const kg = parseFloat(_pStock.value) || 0;
+        const totalGrams = kg * 1000;
+        _pStockNote.textContent = totalGrams > 0 ? `Packets (How many packets): ${Math.floor(totalGrams / ps)}` : '';
       } else {
         _pStockLabel.textContent = 'Stock Quantity';
         _pStock.placeholder = '';
@@ -194,12 +194,13 @@ const ProductsPage = {
       brand: document.getElementById('pBrand').value.trim(),
       costPrice: parseFloat(document.getElementById('pCostPrice').value) || 0,
       sellingPrice: parseFloat(document.getElementById('pSellingPrice').value) || 0,
-      stock: parseFloat(document.getElementById('pStock').value) || 0,
+      stock: (parseFloat(document.getElementById('pPacketSize').value) || 0) > 0 
+                ? (parseFloat(document.getElementById('pStock').value) || 0) * 1000 
+                : (parseFloat(document.getElementById('pStock').value) || 0),
       reorderLevel: parseFloat(document.getElementById('pReorder').value) || 5,
       packetSizeGrams: parseFloat(document.getElementById('pPacketSize').value) || 0,
       mfgDate: document.getElementById('pMfgDate').value || null,
       expDate: document.getElementById('pExpDate').value || null,
-      weight: document.getElementById('pWeight').value.trim() || null,
       batchNo: document.getElementById('pBatchNo').value.trim() || null,
       emoji: product?.emoji || Utils.categoryEmoji(category?.name)
     };

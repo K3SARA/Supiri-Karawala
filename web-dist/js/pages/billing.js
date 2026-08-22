@@ -19,12 +19,14 @@ const BillingPage = {
     content.style.padding = '0';
     content.style.overflow = 'hidden';
 
-    this.cart = [];
-    this.discount = 0;
-    this.amountPaid = 0;
-    this.paymentMethod = 'cash';
-    this.customerId = null;
-    this.invoiceNo = Utils.generateInvoiceNo('INV');
+    if (!this.invoiceNo) {
+      this.cart = [];
+      this.discount = 0;
+      this.amountPaid = 0;
+      this.paymentMethod = 'cash';
+      this.customerId = null;
+      this.invoiceNo = Utils.generateInvoiceNo('INV');
+    }
 
     this.products = await DB.getProducts();
     this.categories = await DB.getCategories();
@@ -80,10 +82,15 @@ const BillingPage = {
             <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
               <span>Invoice: <strong id="invoiceLabel" style="font-size:11px">${this.invoiceNo}</strong></span>
               <div style="display:flex;align-items:center;gap:4px">
-                <select id="customerSelect" class="form-select" style="padding:2px 8px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-secondary);color:var(--text-primary);max-width:160px;min-width:120px">
-                  <option value="">Walk-in</option>
-                  ${customers.map(c => `<option value="${c.id}">${c.name}${c.balance > 0 ? ' (' + Utils.currency(c.balance) + ')' : ''}</option>`).join('')}
-                </select>
+                <input list="customerDatalist" id="customerSearch" class="form-input" placeholder="Search Customer..." autocomplete="off" style="padding:2px 8px;font-size:11px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-secondary);color:var(--text-primary);max-width:160px;min-width:120px" value="${this.customerId ? (() => {
+                  const c = customers.find(x => x.id === this.customerId);
+                  return c ? `${Utils.escapeHtml(c.name)}${c.balance > 0 ? ' (Bal: ' + Utils.currency(c.balance) + ')' : ''}` : 'Walk-in';
+                })() : 'Walk-in'}">
+                <datalist id="customerDatalist">
+                  <option data-id="" value="Walk-in"></option>
+                  ${customers.map(c => `<option data-id="${c.id}" value="${Utils.escapeHtml(c.name)}${c.balance > 0 ? ' (Bal: ' + Utils.currency(c.balance) + ')' : ''}"></option>`).join('')}
+                </datalist>
+                <input type="hidden" id="customerSelect" value="${this.customerId || ''}">
                 <button type="button" class="btn btn-sm btn-outline" id="quickAddCustomerBtn" title="Add new customer" style="padding:2px 8px">${Utils.icons.plus}</button>
               </div>
             </div>
@@ -119,12 +126,12 @@ const BillingPage = {
           <div class="order-payment">
             <div class="order-payment-label">Payment Method</div>
             <div class="payment-methods" id="paymentMethods">
-              <button class="payment-method-btn active" data-method="cash">${Utils.icons.cash} Cash</button>
-              <button class="payment-method-btn" data-method="card">${Utils.icons.card} Card</button>
-              <button class="payment-method-btn" data-method="bank">${Utils.icons.bank} Transfer</button>
-              <button class="payment-method-btn" data-method="cheque">${Utils.icons.cheques} Cheque</button>
-              <button class="payment-method-btn" data-method="credit">${Utils.icons.credit} Credit</button>
-              <button class="payment-method-btn" data-method="split">${Utils.icons.split} Split</button>
+              <button class="payment-method-btn ${this.paymentMethod === 'cash' ? 'active' : ''}" data-method="cash">${Utils.icons.cash} Cash</button>
+              <button class="payment-method-btn ${this.paymentMethod === 'card' ? 'active' : ''}" data-method="card">${Utils.icons.card} Card</button>
+              <button class="payment-method-btn ${this.paymentMethod === 'bank' ? 'active' : ''}" data-method="bank">${Utils.icons.bank} Transfer</button>
+              <button class="payment-method-btn ${this.paymentMethod === 'cheque' ? 'active' : ''}" data-method="cheque">${Utils.icons.cheques} Cheque</button>
+              <button class="payment-method-btn ${this.paymentMethod === 'credit' ? 'active' : ''}" data-method="credit">${Utils.icons.credit} Credit</button>
+              <button class="payment-method-btn ${this.paymentMethod === 'split' ? 'active' : ''}" data-method="split">${Utils.icons.split} Split</button>
             </div>
             <div id="chequeFieldsBilling" style="display:none;padding:10px 0 4px;border-top:1px solid var(--border);margin-top:10px">
               <div class="form-row" style="margin-bottom:8px">
@@ -186,7 +193,7 @@ const BillingPage = {
             <div class="order-amount-row">
               <div class="form-group">
                 <label id="amountPaidLabel">Amount Paid</label>
-                <input type="number" class="form-input" id="amountPaidInput" value="0" min="0" step="0.01">
+                <input type="number" class="form-input" id="amountPaidInput" value="${this.amountPaid || 0}" min="0" step="0.01">
               </div>
               <div class="form-group">
                 <label id="changeLabel">Change</label>
@@ -207,6 +214,16 @@ const BillingPage = {
 
     this.renderProducts();
     this.bindEvents();
+    this.renderCart();
+    
+    // Restore UI state for payment methods and credit/cheque fields
+    if (this.paymentMethod && this.paymentMethod !== 'cash') {
+      setTimeout(() => document.querySelector(`.payment-method-btn[data-method="${this.paymentMethod}"]`)?.click(), 50);
+    }
+    
+    if (this.customerId) {
+       document.getElementById('customerSelect').dispatchEvent(new Event('change'));
+    }
   },
 
   renderProducts() {
@@ -278,15 +295,22 @@ const BillingPage = {
         const totalGramsText = totalGrams >= 1000 ? (totalGrams/1000).toFixed(3)+'kg' : totalGrams.toFixed(1)+'g';
         return `
         <div class="order-item" data-idx="${idx}" style="flex-direction: column; width: 100%">
-          <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px">
-            <div class="order-item-name" style="font-weight:600; font-size:13px; color:var(--text-primary)">
-              ${item.emoji || '📦'} ${Utils.escapeHtml(item.name)}
-            </div>
-            <div style="display:flex; align-items:center; gap:8px">
-              <div class="order-item-price" style="font-weight:700; font-size:13px; color:var(--text-primary)">
-                ${Utils.currency(item.quantity * item.price - (item.discount || 0))}
+          <div style="display:flex; justify-content:space-between; margin-bottom:8px">
+            <div style="flex:1">
+              <div style="font-weight:700; color:var(--text-primary); font-size:13px; display:flex; align-items:center; gap:4px">
+                <span>${item.emoji || '📦'}</span>
+                <input type="text" data-cart-name="${idx}" value="${Utils.escapeHtml(item.name)}" 
+                  title="Click to edit name for this receipt"
+                  style="font-weight:700; font-size:13px; background:transparent; border:1px solid transparent; color:inherit; width:100%; min-width:140px; padding:2px 4px; border-radius:4px"
+                  onfocus="this.style.border='1px dashed var(--border)'; this.style.background='var(--bg-input)'" 
+                  onblur="this.style.border='1px solid transparent'; this.style.background='transparent'">
               </div>
-              <button class="order-item-remove" data-cart-action="remove" data-idx="${idx}" style="margin:0">${Utils.icons.close}</button>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:flex-end; justify-content:space-between; height:100%">
+              <div style="font-weight:700; font-size:14px; color:var(--primary)" id="cart-item-total-${idx}">
+                ${Utils.currency(Math.max(0, ((item.quantity - (item.boxWeight || 0)) * item.price) - (item.discount || 0)))}
+              </div>
+              <button class="order-item-remove" data-cart-action="remove" data-idx="${idx}" style="margin:0; padding:0; border:none; background:none; color:var(--danger)">${Utils.icons.close}</button>
             </div>
           </div>
 
@@ -296,7 +320,7 @@ const BillingPage = {
                 <span>Pack:</span>
                 <input type="number" data-cart-grams="${idx}" value="${item.gramsPerPacket}"
                   min="0.001" step="any"
-                  style="width:50px; padding:2px 4px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
+                  style="width:65px; padding:2px 4px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
                 <span>g</span>
               </div>
               
@@ -304,18 +328,18 @@ const BillingPage = {
                 <span>Price:</span>
                 <input type="number" data-cart-price="${idx}" value="${item.price}"
                   min="0" step="0.01"
-                  style="width:65px; padding:2px 4px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
+                  style="width:80px; padding:2px 4px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
               </div>
 
               <div style="display:flex; align-items:center; gap:3px">
                 <span>Disc:</span>
                 <input type="number" data-cart-discount="${idx}" value="${item.discount || 0}"
                   min="0" step="0.01"
-                  style="width:55px; padding:2px 4px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
+                  style="width:70px; padding:2px 4px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
               </div>
               
               <div style="color:var(--text-light)">
-                (Total: <strong>${totalGramsText}</strong>)
+                (Total: <strong id="cart-item-total-grams-${idx}">${totalGramsText}</strong>)
               </div>
             </div>
           ` : `
@@ -335,11 +359,18 @@ const BillingPage = {
               </div>
             </div>
           `}
+          
+          <div style="display:flex; align-items:center; gap:3px; margin-top:4px; font-size:11px; color:var(--text-secondary)">
+            <span>Box Wt(kg):</span>
+            <input type="number" data-cart-box-weight="${idx}" value="${item.boxWeight || 0}"
+              min="0" step="0.001"
+              style="width:55px; padding:2px 4px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
+          </div>
 
           <div class="order-item-qty-controls" style="margin-top:6px; gap:4px">
             <button data-cart-action="dec" data-idx="${idx}" style="width:20px; height:20px; font-size:12px; border-radius:var(--radius-sm)">−</button>
             <input type="number" data-cart-qty="${idx}" value="${item.quantity}" min="0.001" step="any"
-              style="width:50px; text-align:center; font-weight:600; padding:1px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
+              style="width:80px; text-align:center; font-weight:600; padding:1px; font-size:11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-input); color:var(--text-primary)">
             <span style="font-size:11px; color:var(--text-secondary)">${isPacket ? 'pkts' : 'units'}</span>
             <button data-cart-action="inc" data-idx="${idx}" style="width:20px; height:20px; font-size:12px; border-radius:var(--radius-sm)">+</button>
           </div>
@@ -356,7 +387,7 @@ const BillingPage = {
   },
 
   updateTotals() {
-    const subtotal = this.cart.reduce((sum, item) => sum + item.quantity * item.price, 0);
+    const subtotal = this.cart.reduce((sum, item) => sum + Math.max(0, (item.quantity - (item.boxWeight || 0))) * item.price, 0);
     const totalItemDiscount = this.cart.reduce((sum, item) => sum + (item.discount || 0), 0);
     
     if (this.discount > (subtotal - totalItemDiscount)) this.discount = Math.max(0, subtotal - totalItemDiscount);
@@ -538,9 +569,16 @@ const BillingPage = {
       Toast.success('Added', `${name} added and selected for this sale`);
 
       const customers = await DB.getCustomers();
+      const dl = document.getElementById('customerDatalist');
+      if (dl) {
+        dl.innerHTML = `<option data-id="" value="Walk-in"></option>` +
+          customers.map(c => `<option data-id="${c.id}" value="${Utils.escapeHtml(c.name)}${c.balance > 0 ? ' (Bal: ' + Utils.currency(c.balance) + ')' : ''}"></option>`).join('');
+      }
+      const c = customers.find(x => x.id === newId);
+      if (document.getElementById('customerSearch')) {
+        document.getElementById('customerSearch').value = c ? `${c.name}${c.balance > 0 ? ' (Bal: ' + Utils.currency(c.balance) + ')' : ''}` : '';
+      }
       const select = document.getElementById('customerSelect');
-      select.innerHTML = `<option value="">Walk-in</option>` +
-        customers.map(c => `<option value="${c.id}">${Utils.escapeHtml(c.name)}${c.balance > 0 ? ' (' + Utils.currency(c.balance) + ')' : ''}</option>`).join('');
       select.value = String(newId);
       select.dispatchEvent(new Event('change'));
     };
@@ -780,16 +818,42 @@ const BillingPage = {
     });
 
     // Editable g/pkt and price inputs in cart (event delegation on orderItems)
-    document.getElementById('orderItems').addEventListener('change', (e) => {
+    document.getElementById('orderItems').addEventListener('input', (e) => {
+      const updateRow = (idx) => {
+        const item = self.cart[idx];
+        if (!item) return;
+        const itemTotal = Math.max(0, ((item.quantity - (item.boxWeight || 0)) * item.price) - (item.discount || 0));
+        const totalEl = document.getElementById(`cart-item-total-${idx}`);
+        if (totalEl) totalEl.textContent = Utils.currency(itemTotal);
+        
+        if (item.gramsPerPacket > 0) {
+          const gramsEl = document.getElementById(`cart-item-total-grams-${idx}`);
+          if (gramsEl) {
+            const totalG = (item.quantity - (item.boxWeight || 0)) * item.gramsPerPacket;
+            gramsEl.textContent = totalG >= 1000 ? (totalG / 1000).toFixed(2) + ' kg' : totalG.toFixed(1) + ' g';
+          }
+        }
+        self.updateTotals();
+      };
+
       if (e.target.dataset.cartGrams !== undefined) {
         const idx = parseInt(e.target.dataset.cartGrams);
         const val = parseFloat(e.target.value) || 1;
-        if (self.cart[idx]) { self.cart[idx].gramsPerPacket = Math.max(0.001, val); self.renderCart(); }
+        if (self.cart[idx]) { self.cart[idx].gramsPerPacket = Math.max(0.001, val); updateRow(idx); }
       }
       if (e.target.dataset.cartPrice !== undefined) {
         const idx = parseInt(e.target.dataset.cartPrice);
         const val = parseFloat(e.target.value) || 0;
-        if (self.cart[idx]) { self.cart[idx].price = Math.max(0, val); self.renderCart(); self.updateTotals(); }
+        if (self.cart[idx]) { self.cart[idx].price = Math.max(0, val); updateRow(idx); }
+      }
+      if (e.target.dataset.cartName !== undefined) {
+        const idx = parseInt(e.target.dataset.cartName);
+        if (self.cart[idx]) { self.cart[idx].name = e.target.value || 'Item'; }
+      }
+      if (e.target.dataset.cartBoxWeight !== undefined) {
+        const idx = parseInt(e.target.dataset.cartBoxWeight);
+        const val = parseFloat(e.target.value) || 0;
+        if (self.cart[idx]) { self.cart[idx].boxWeight = Math.max(0, val); updateRow(idx); }
       }
       if (e.target.dataset.cartQty !== undefined) {
         const idx = parseInt(e.target.dataset.cartQty);
@@ -808,8 +872,7 @@ const BillingPage = {
             return;
           }
           item.quantity = quantity;
-          self.renderCart();
-          self.renderProducts();
+          updateRow(idx);
         }
       }
       if (e.target.dataset.cartDiscount !== undefined) {
@@ -824,7 +887,7 @@ const BillingPage = {
             return;
           }
           item.discount = Math.max(0, val);
-          self.renderCart();
+          updateRow(idx);
         }
       }
     });
@@ -932,17 +995,57 @@ const BillingPage = {
     document.getElementById('quickAddCustomerBtn').addEventListener('click', () => self.showQuickAddCustomer());
 
     // Customer select
-    document.getElementById('customerSelect').addEventListener('change', async (e) => {
-      self.customerId = e.target.value ? parseInt(e.target.value) : null;
-      self.selectedCustomerBalance = 0;
-      if (self.paymentMethod === 'credit') {
-        await self.updateCreditPanel();
-        self.updateTotals();
-      }
-      if (self.paymentMethod === 'cheque') {
-        await self.updateChequeLimitPanel();
-      }
-    });
+    const custSearch = document.getElementById('customerSearch');
+    const custHidden = document.getElementById('customerSelect');
+    
+    if (custSearch && custHidden) {
+      custSearch.addEventListener('change', (e) => {
+        const val = e.target.value;
+        const dl = document.getElementById('customerDatalist');
+        const opt = Array.from(dl.options).find(o => o.value === val);
+        
+        let selectedId = null;
+        if (opt && opt.dataset.id) {
+           selectedId = parseInt(opt.dataset.id);
+        } else if (val === 'Walk-in' || val === '') {
+           selectedId = null;
+           e.target.value = 'Walk-in';
+        } else {
+           return;
+        }
+        
+        if (custHidden.value !== String(selectedId || '')) {
+          custHidden.value = selectedId || '';
+          custHidden.dispatchEvent(new Event('change'));
+        }
+      });
+      
+      custSearch.addEventListener('focus', (e) => {
+          e.target.value = '';
+      });
+      
+      custSearch.addEventListener('blur', async (e) => {
+          if (!e.target.value) {
+              const customers = await DB.getCustomers();
+              const c = customers.find(x => x.id === self.customerId);
+              e.target.value = c ? `${c.name}${c.balance > 0 ? ' (Bal: ' + Utils.currency(c.balance) + ')' : ''}` : 'Walk-in';
+          }
+      });
+    }
+
+    if (custHidden) {
+      custHidden.addEventListener('change', async (e) => {
+        self.customerId = e.target.value ? parseInt(e.target.value) : null;
+        self.selectedCustomerBalance = 0;
+        if (self.paymentMethod === 'credit') {
+          await self.updateCreditPanel();
+          self.updateTotals();
+        }
+        if (self.paymentMethod === 'cheque') {
+          await self.updateChequeLimitPanel();
+        }
+      });
+    }
 
     // Place order
     document.getElementById('placeOrderBtn').addEventListener('click', () => self.placeOrder());
@@ -986,7 +1089,7 @@ const BillingPage = {
       return;
     }
 
-    const subtotal = this.cart.reduce((sum, item) => sum + item.quantity * item.price, 0);
+    const subtotal = this.cart.reduce((sum, item) => sum + Math.max(0, (item.quantity - (item.boxWeight || 0))) * item.price, 0);
     const totalItemDiscount = this.cart.reduce((sum, item) => sum + (item.discount || 0), 0);
     if (this.discount > (subtotal - totalItemDiscount)) {
       Toast.warning('Invalid Discount', 'Discount cannot be greater than subtotal');
@@ -1004,7 +1107,8 @@ const BillingPage = {
 
     if (this.paymentMethod === 'credit' && !this.customerId) {
       Toast.warning('Select Customer', 'Credit sales must be assigned to a customer to track the outstanding balance');
-      document.getElementById('customerSelect').focus();
+      const searchInput = document.getElementById('customerSearch');
+      if (searchInput) searchInput.focus();
       return;
     }
     if (amountPaid <= 0 && this.paymentMethod === 'cash' && remainingAfterCredit > 0) {
@@ -1014,7 +1118,8 @@ const BillingPage = {
     }
     if (remainingAfterCredit > 0 && !this.customerId) {
       Toast.warning('Select Customer', 'Partial payments must be assigned to a customer so the due amount is tracked');
-      document.getElementById('customerSelect').focus();
+      const searchInput = document.getElementById('customerSearch');
+      if (searchInput) searchInput.focus();
       return;
     }
 
@@ -1035,11 +1140,12 @@ const BillingPage = {
         variationId: item.variationId || null,
         name: item.name,
         quantity: item.quantity,
+        boxWeight: item.boxWeight || 0,
         price: item.price,
         costPrice: item.costPrice || 0,
         discount: item.discount || 0,
         gramsPerPacket: item.gramsPerPacket || 0,
-        total: item.quantity * item.price - (item.discount || 0)
+        total: Math.max(0, item.quantity - (item.boxWeight || 0)) * item.price - (item.discount || 0)
       }))
     };
 
@@ -1134,7 +1240,7 @@ const BillingPage = {
 
   async previewReceipt() {
     if (this.cart.length === 0) { Toast.warning('Empty Cart', 'Add items first'); return; }
-    const subtotal = this.cart.reduce((sum, item) => sum + item.quantity * item.price, 0);
+    const subtotal = this.cart.reduce((sum, item) => sum + Math.max(0, (item.quantity - (item.boxWeight || 0))) * item.price, 0);
     const totalItemDiscount = this.cart.reduce((sum, item) => sum + (item.discount || 0), 0);
     if (this.discount > (subtotal - totalItemDiscount)) {
       Toast.warning('Invalid Discount', 'Discount cannot be greater than subtotal');
@@ -1156,13 +1262,13 @@ const BillingPage = {
       createdAt: new Date()
     };
     Receipt.previewWithFormatChooser(sale, this.cart.map(item => ({
-      name: item.name, quantity: item.quantity, price: item.price, discount: item.discount || 0
+      name: item.name, quantity: item.quantity, boxWeight: item.boxWeight || 0, price: item.price, discount: item.discount || 0, gramsPerPacket: item.gramsPerPacket || 0
     })));
   },
 
   async shareCart() {
     if (this.cart.length === 0) { Toast.warning('Empty Cart', 'Add items first'); return; }
-    const subtotal = this.cart.reduce((sum, item) => sum + item.quantity * item.price, 0);
+    const subtotal = this.cart.reduce((sum, item) => sum + Math.max(0, (item.quantity - (item.boxWeight || 0))) * item.price, 0);
     const totalItemDiscount = this.cart.reduce((sum, item) => sum + (item.discount || 0), 0);
     const taxableAmount = Math.max(0, subtotal - totalItemDiscount - this.discount);
     const tax = taxableAmount * (this.taxRate / 100);
@@ -1176,9 +1282,9 @@ const BillingPage = {
       createdAt: new Date()
     };
     const saleItems = this.cart.map(item => ({
-      name: item.name, quantity: item.quantity, price: item.price,
-      discount: item.discount || 0,
-      total: item.quantity * item.price - (item.discount || 0)
+      name: item.name, quantity: item.quantity, boxWeight: item.boxWeight || 0, price: item.price,
+      discount: item.discount || 0, gramsPerPacket: item.gramsPerPacket || 0,
+      total: Math.max(0, item.quantity - (item.boxWeight || 0)) * item.price - (item.discount || 0)
     }));
     await Receipt.showShareModal(sale, saleItems);
   },
@@ -1191,7 +1297,10 @@ const BillingPage = {
     this.customerId = null;
     this.invoiceNo = Utils.generateInvoiceNo('INV');
     document.getElementById('invoiceLabel').textContent = this.invoiceNo;
-    document.getElementById('customerSelect').value = '';
+    const custHidden = document.getElementById('customerSelect');
+    if (custHidden) custHidden.value = '';
+    const custSearch = document.getElementById('customerSearch');
+    if (custSearch) custSearch.value = 'Walk-in';
     document.getElementById('amountPaidInput').value = '0';
     document.getElementById('amountPaidInput').disabled = false;
     document.querySelectorAll('.payment-method-btn').forEach(b => b.classList.remove('active'));

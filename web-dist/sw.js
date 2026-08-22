@@ -1,4 +1,4 @@
-const CACHE_NAME = 'supiri-karawala-1784390099682';
+const CACHE_NAME = 'supiri-karawala-1787393167899';
 const ASSETS = [
   "./",
   "index.html",

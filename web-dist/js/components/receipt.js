@@ -24,12 +24,14 @@ const Receipt = {
     return saleItems.map(item => {
       const key = item.variationId ? `v:${item.variationId}` : `p:${item.productId}`;
       const returnedQty = returnedQtyByItem[key] || 0;
-      const quantity = Math.max(0, (item.quantity || 0) - returnedQty);
-      const originalQty = item.quantity || 0;
+      const netQty = Math.max(0, (item.quantity || 0) - (item.boxWeight || 0));
+      const quantity = Math.max(0, netQty - returnedQty);
+      const originalQty = netQty;
       const discount = originalQty > 0 ? (item.discount || 0) * (quantity / originalQty) : 0;
       return {
         ...item,
         quantity,
+        originalGross: item.quantity,
         discount,
         returnedQty,
         total: quantity * (item.price || 0) - discount
@@ -97,11 +99,14 @@ const Receipt = {
     const receiptItems = await this.getReceiptItems(sale, saleItems);
     const itemsHtml = receiptItems.map(item => {
       const gpp = item.gramsPerPacket || 0;
-      const nameLabel = gpp > 0 ? `${Utils.escapeHtml(item.name || 'Item')} (${gpp}g/pkt)` : Utils.escapeHtml(item.name || 'Item');
-      const qtyLabel = gpp > 0 ? `${item.quantity}p` : item.quantity;
+      const baseName = Utils.escapeHtml(item.name || 'Item');
+      const displayName = (item.boxWeight > 0) ? `${baseName} - [${item.originalGross}KG]` : baseName;
+      let qtyLabel = item.quantity;
+      if (item.boxWeight > 0 || String(item.quantity).includes('.') || gpp === 1000) qtyLabel = `${item.quantity} KG`;
+      else if (gpp > 0) qtyLabel = `${item.quantity}p`;
       return `
       <tr>
-        <td colspan="3" class="item-name">${nameLabel}</td>
+        <td colspan="3" class="item-name">${displayName}</td>
       </tr>
       <tr>
         <td class="center qty-cell">${qtyLabel}</td>
@@ -240,10 +245,10 @@ const Receipt = {
           ${sale.tax > 0 ? `<div class="total-row"><span>Tax:</span><span>LKR ${Utils.currencyPlain(sale.tax)}</span></div>` : ''}
           <div class="total-row grand"><span>Total:</span><span>LKR ${Utils.currencyPlain(sale.total)}</span></div>
           <div class="total-row"><span class="label">Payment:</span><span>${this.paymentLabel(sale.paymentMethod)}</span></div>
-          <div class="total-row"><span>Cash Paid:</span><span>LKR ${Utils.currencyPlain(sale.amountPaid)}</span></div>
-          <div class="total-row"><span class="label">Balance:</span><span>LKR ${Utils.currencyPlain(sale.change || 0)}</span></div>
-          ${sale.dueAmount > 0 ? `<div class="total-row grand"><span>Due:</span><span>LKR ${Utils.currencyPlain(sale.dueAmount)}</span></div>` : ''}
-          <div class="total-row"><span>Total Items:</span><span>${receiptItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)}</span></div>
+          <div class="total-row grand"><span>Paid:</span><span>LKR ${Utils.currencyPlain(sale.amountPaid || 0)}</span></div>
+          ${(sale.change || 0) > 0 ? `<div class="total-row grand"><span>Balance:</span><span>LKR ${Utils.currencyPlain(sale.change)}</span></div>` : ''}
+          <div class="total-row grand"><span>Due:</span><span>LKR ${Utils.currencyPlain(sale.dueAmount || 0)}</span></div>
+          <div class="total-row" style="margin-top: 4px;"><span>Total Items:</span><span>${receiptItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)}</span></div>
         </div>
         <div class="line"></div>
         <div class="footer">${Utils.escapeHtml(footer)}</div>
@@ -280,8 +285,12 @@ const Receipt = {
       const rs = Math.floor(total);
       const cts = Math.round((total - rs) * 100);
       const gpp = item.gramsPerPacket || 0;
-      const qtyLabel = gpp > 0 ? `${qty}p` : qty;
-      const nameLabel = gpp > 0 ? `${Utils.escapeHtml(item.name || 'Item')} (${gpp}g)` : Utils.escapeHtml(item.name || 'Item');
+      let qtyLabel = qty;
+      if (item.boxWeight > 0 || String(qty).includes('.') || gpp === 1000) qtyLabel = `${qty} KG`;
+      else if (gpp > 0) qtyLabel = `${qty}p`;
+      const baseName = Utils.escapeHtml(item.name || 'Item');
+      const displayName = (item.boxWeight > 0) ? `${baseName} - [${item.originalGross}KG]` : baseName;
+      const nameLabel = gpp > 0 ? `${displayName} (${gpp}g)` : displayName;
       return `<tr>
         <td class="c-no">${idx + 1}</td>
         <td class="c-desc">${nameLabel}</td>
@@ -304,7 +313,6 @@ const Receipt = {
     const extraInfoHtml = [
       discount > 0 ? `Discount: -${Utils.currencyPlain(discount)}` : '',
       (sale.tax || 0) > 0 ? `Tax: ${Utils.currencyPlain(sale.tax)}` : '',
-      sale.dueAmount > 0 ? `Due: ${Utils.currencyPlain(sale.dueAmount)}` : '',
       `Payment: ${payMethod}`
     ].filter(Boolean).join(' | ');
 
@@ -382,9 +390,9 @@ const Receipt = {
 
   table.inv-table tr.tfoot-row td {
     border: none;
-    height: 48px;
+    height: 36px;
     vertical-align: middle;
-    padding-top: 10px;
+    padding-top: 6px;
   }
   table.inv-table tr.tfoot-row td.invoice-no-val {
     color: #cc0000;
@@ -455,10 +463,18 @@ const Receipt = {
       ${itemRowsHtml}
       ${emptyRowsHtml}
       <tr class="tfoot-row">
-        <td colspan="2" class="invoice-no-val">${Utils.escapeHtml(sale.invoiceNo || 'N/A')}</td>
-        <td class="extra-info-cell">${Utils.escapeHtml(extraInfoHtml)}</td>
+        <td colspan="2" rowspan="3" class="invoice-no-val" style="vertical-align:top; padding-top:15px;">${Utils.escapeHtml(sale.invoiceNo || 'N/A')}</td>
+        <td rowspan="3" class="extra-info-cell" style="vertical-align:top; padding-top:15px;">${Utils.escapeHtml(extraInfoHtml)}</td>
         <td class="total-label">Total</td>
         <td colspan="2" class="total-box-cell">${Utils.currencyPlain(total)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Paid</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.amountPaid || 0)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Due</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.dueAmount || 0)}</td>
       </tr>
     </tbody>
   </table>
@@ -494,8 +510,12 @@ const Receipt = {
       const rs = Math.floor(total);
       const cts = Math.round((total - rs) * 100);
       const gpp = item.gramsPerPacket || 0;
-      const qtyLabel = gpp > 0 ? `${qty}p` : qty;
-      const nameLabel = gpp > 0 ? `${Utils.escapeHtml(item.name || 'Item')} (${gpp}g)` : Utils.escapeHtml(item.name || 'Item');
+      let qtyLabel = qty;
+      if (item.boxWeight > 0 || String(qty).includes('.') || gpp === 1000) qtyLabel = `${qty} KG`;
+      else if (gpp > 0) qtyLabel = `${qty}p`;
+      const baseName = Utils.escapeHtml(item.name || 'Item');
+      const displayName = (item.boxWeight > 0) ? `${baseName} - [${item.originalGross}KG]` : baseName;
+      const nameLabel = gpp > 0 ? `${displayName} (${gpp}g)` : displayName;
       return `<tr>
         <td class="c-no">${idx + 1}</td>
         <td class="c-desc">${nameLabel}</td>
@@ -518,7 +538,6 @@ const Receipt = {
     const extraInfoHtml = [
       discount > 0 ? `Discount: -${Utils.currencyPlain(discount)}` : '',
       (sale.tax || 0) > 0 ? `Tax: ${Utils.currencyPlain(sale.tax)}` : '',
-      sale.dueAmount > 0 ? `Due: ${Utils.currencyPlain(sale.dueAmount)}` : '',
       `Payment: ${payMethod}`
     ].filter(Boolean).join(' | ');
 
@@ -588,9 +607,9 @@ const Receipt = {
 
   table.inv-table tr.tfoot-row td {
     border: none;
-    height: 38px;
+    height: 30px;
     vertical-align: middle;
-    padding-top: 6px;
+    padding-top: 4px;
   }
   table.inv-table tr.tfoot-row td.invoice-no-val {
     color: #cc0000;
@@ -661,10 +680,18 @@ const Receipt = {
       ${itemRowsHtml}
       ${emptyRowsHtml}
       <tr class="tfoot-row">
-        <td colspan="2" class="invoice-no-val">${Utils.escapeHtml(sale.invoiceNo || 'N/A')}</td>
-        <td class="extra-info-cell">${Utils.escapeHtml(extraInfoHtml)}</td>
+        <td colspan="2" rowspan="3" class="invoice-no-val" style="vertical-align:top; padding-top:10px;">${Utils.escapeHtml(sale.invoiceNo || 'N/A')}</td>
+        <td rowspan="3" class="extra-info-cell" style="vertical-align:top; padding-top:10px;">${Utils.escapeHtml(extraInfoHtml)}</td>
         <td class="total-label">Total</td>
         <td colspan="2" class="total-box-cell">${Utils.currencyPlain(total)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Paid</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.amountPaid || 0)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Due</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.dueAmount || 0)}</td>
       </tr>
     </tbody>
   </table>

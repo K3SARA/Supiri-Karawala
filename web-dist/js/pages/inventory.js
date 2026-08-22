@@ -7,6 +7,15 @@ const InventoryPage = {
     content.style.overflow = '';
 
     const products = await DB.getProducts();
+    const acc = { items: 0, value: 0, lowStock: 0 };
+    products.forEach(p => {
+      const stock = p.stock || 0;
+      const gpp = p.packetSizeGrams || 0;
+      const packets = gpp > 0 ? (stock / gpp) : stock;
+      acc.items += packets;
+      acc.value += packets * (p.costPrice || 0);
+      if (stock <= (p.reorderLevel || 5)) acc.lowStock++;
+    });
     const lowStock = products.filter(p => {
       const gpp = p.packetSizeGrams || 0;
       if (gpp > 0) return ((p.stock || 0) / gpp) <= (p.reorderLevel || 5);

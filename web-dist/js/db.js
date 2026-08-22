@@ -29,6 +29,9 @@ const DB = {
     this.db.version(2).stores({
       cheques: '++id, paymentId, customerId, supplierId, saleId, chequeNumber, bankName, status, dueDate, receivedDate, createdAt'
     });
+    this.db.version(3).stores({
+      syncQueue: '++id, method, timestamp'
+    });
     await this.db.open();
 
     // Read cloud settings before initialization
@@ -212,6 +215,7 @@ const DB = {
     }
 
     this.wrapCloudMethods();
+    this.startBackgroundSync();
   },
 
   wrapCloudMethods() {
@@ -240,82 +244,102 @@ const DB = {
     ];
 
     readMethods.forEach(name => {
-      if (typeof this[name] !== 'function') return;
-      const original = this[name].bind(this);
-      this[name] = async (...args) => {
-        try { await this.pullFromCloud(); } catch (e) {
-          console.warn(`pullFromCloud failed for ${name}, using local data:`, e.message);
-        }
-        return original(...args);
-      };
+      // Local reads are completely instant now!
+      // Background worker handles pulling updates if there are any.
     });
 
     writeMethods.forEach(name => {
       if (typeof this[name] !== 'function') return;
+      const original = this[name].bind(this);
       this[name] = async (...args) => {
-        return await this.mutateCloud(name, args);
+        // Optimistic UI: Apply mutation locally immediately
+        const result = await original(...args);
+        
+        // Queue it for cloud synchronization
+        if (this.cloudEnabled && !this._applyingCloudSnapshot && name !== 'importData' && name !== 'seedIfEmpty') {
+          await this.db.syncQueue.add({
+            method: name,
+            args: args,
+            timestamp: new Date().getTime()
+          });
+          // Trigger queue processing (non-blocking)
+          this.processSyncQueue().catch(e => console.warn('Background sync trigger failed', e));
+        }
+        return result;
       };
     });
   },
 
-  async mutateCloud(method, args) {
-    if (!this.cloudEnabled || this._applyingCloudSnapshot) return null;
-
-    const res = await fetch(this.getCloudUrl('/api/db/mutate'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ method, args })
-    });
-
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `Cloud mutation failed (${res.status})`);
-
-    this._applyingCloudSnapshot = true;
-    await this.importData(this.reviveDataDates(body.data));
-    this._applyingCloudSnapshot = false;
-    this.cloudRevision = body.revision || this.cloudRevision;
-    return body.result;
+  async processSyncQueue() {
+    if (this._isSyncing || !this.cloudEnabled || this._applyingCloudSnapshot) return;
+    this._isSyncing = true;
+    
+    try {
+      const pending = await this.db.syncQueue.orderBy('id').toArray();
+      for (const item of pending) {
+        const res = await fetch(this.getCloudUrl('/api/db/mutate'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: item.method, args: item.args })
+        });
+        
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) {
+          await this.db.syncQueue.delete(item.id);
+          this.cloudRevision = body.revision || this.cloudRevision;
+          window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pending: await this.db.syncQueue.count() } }));
+        } else {
+          throw new Error(body.error || `Cloud mutation failed (${res.status})`);
+        }
+      }
+    } catch (e) {
+      console.warn('Sync queue process error:', e);
+    } finally {
+      this._isSyncing = false;
+      const pendingCount = await this.db.syncQueue.count().catch(() => 0);
+      window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pending: pendingCount } }));
+    }
   },
 
   async fetchCloudSnapshot() {
-    const res = await fetch(this.getCloudUrl('/api/db/snapshot'), { cache: 'no-store' });
+    const res = await fetch(this.getCloudUrl(`/api/db/snapshot?revision=${this.cloudRevision || 0}`), { cache: 'no-store' });
     if (!res.ok) throw new Error(`Cloud snapshot fetch failed (${res.status})`);
     return await res.json();
   },
 
-  async pullFromCloud() {
+  async pollCloudRevision() {
     if (!this.cloudEnabled || this._applyingCloudSnapshot) return;
-    const snapshot = await this.fetchCloudSnapshot();
-    if (!snapshot.initialized || !snapshot.data || snapshot.revision === this.cloudRevision) return;
+    try {
+      const pendingCount = await this.db.syncQueue.count();
+      if (pendingCount > 0) return; // Wait until local changes are pushed before pulling
 
-    this._applyingCloudSnapshot = true;
-    await this.importData(this.reviveDataDates(snapshot.data));
-    this._applyingCloudSnapshot = false;
-    this.cloudRevision = snapshot.revision || 0;
+      const snapshot = await this.fetchCloudSnapshot();
+      if (!snapshot.initialized || !snapshot.data || snapshot.revision <= this.cloudRevision) return;
+      
+      // Secondary check in case queue changed during fetch
+      const pendingCountPost = await this.db.syncQueue.count();
+      if (pendingCountPost > 0) return; 
+
+      this._applyingCloudSnapshot = true;
+      await this.importData(this.reviveDataDates(snapshot.data));
+      this._applyingCloudSnapshot = false;
+      this.cloudRevision = snapshot.revision;
+      window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pulled: true, pending: 0 } }));
+    } catch (e) {
+      console.warn('Polling cloud revision failed', e);
+    }
   },
 
-  async syncToCloud() {
-    if (!this.cloudEnabled || this._applyingCloudSnapshot) return;
-
-    const data = await this.exportData();
-    const res = await fetch(this.getCloudUrl('/api/db/snapshot'), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ revision: this.cloudRevision, data })
-    });
-
-    if (res.status === 409) {
-      const conflict = await res.json();
-      this._applyingCloudSnapshot = true;
-      await this.importData(this.reviveDataDates(conflict.data));
-      this._applyingCloudSnapshot = false;
-      this.cloudRevision = conflict.revision || 0;
-      throw new Error('Cloud data changed in another browser. The latest database was reloaded; please try again.');
-    }
-
-    if (!res.ok) throw new Error(`Cloud sync failed (${res.status})`);
-    const result = await res.json();
-    this.cloudRevision = result.revision || this.cloudRevision;
+  startBackgroundSync() {
+    if (this._syncInterval) clearInterval(this._syncInterval);
+    if (this._pollInterval) clearInterval(this._pollInterval);
+    
+    this._syncInterval = setInterval(() => this.processSyncQueue(), 5000);
+    this._pollInterval = setInterval(() => this.pollCloudRevision(), 15000);
+    
+    this.db.syncQueue.count().then(pending => {
+      window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pending } }));
+    }).catch(() => {});
   },
 
   reviveDataDates(data) {
@@ -393,13 +417,13 @@ const DB = {
   // ======= SALES =======
   async getSales() {
     const sales = await this.db.sales.orderBy('createdAt').reverse().toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
   async getAllSales() { return await this.db.sales.orderBy('createdAt').reverse().toArray(); },
   async getSale(id) { return await this.db.sales.get(id); },
   async getSalesByDate(start, end) {
     const sales = await this.db.sales.where('createdAt').between(start, end, true, true).toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
   async addSale(sale) {
     return await this.db.transaction(
@@ -431,14 +455,16 @@ const DB = {
 
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            const vDeduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const vDeduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
             if (!v || (v.stock || 0) < vDeduction) {
               throw new Error(`Insufficient stock for variation ${item.variationId}`);
             }
             await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - vDeduction });
           } else {
             const p = await this.db.products.get(item.productId);
-            const deduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const deduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
             if (!p || (p.stock || 0) < deduction) {
               throw new Error(`Insufficient stock for ${p?.name || 'product'}`);
             }
@@ -498,7 +524,8 @@ const DB = {
         const oldItems = await this.db.saleItems.where('saleId').equals(saleId).toArray();
 
         for (const item of oldItems) {
-          const restoreAmt = (item.gramsPerPacket > 0) ? (item.quantity || 0) * item.gramsPerPacket : (item.quantity || 0);
+          const netQty = Math.max(0, (item.quantity || 0) - (item.boxWeight || 0));
+          const restoreAmt = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
             if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + restoreAmt });
@@ -529,18 +556,20 @@ const DB = {
 
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            const vDeduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const vDeduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
             if (!v || (v.stock || 0) < vDeduction) {
               throw new Error(`Insufficient stock for variation ${item.variationId}`);
             }
             await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - vDeduction });
           } else {
-            const deduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
             const p = await this.db.products.get(item.productId);
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const deduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
             if (!p || (p.stock || 0) < deduction) {
               throw new Error(`Insufficient stock for ${p?.name || 'product'}`);
             }
-            await this.db.products.update(item.productId, { stock: (p.stock || 0) - deduction });
+            await this.db.products.update(item.productId, { stock: Math.max(0, (p.stock || 0) - deduction) });
           }
         }
 
@@ -599,7 +628,8 @@ const DB = {
         for (const item of items) {
           const key = item.variationId ? `v:${item.variationId}` : `p:${item.productId}`;
           const returnQty = returnedQtyByItem[key] || 0;
-          const restoreQty = Math.max(0, (item.quantity || 0) - returnQty);
+          const netQty = Math.max(0, (item.quantity || 0) - (item.boxWeight || 0));
+          const restoreQty = Math.max(0, netQty - returnQty);
           if (restoreQty <= 0) continue;
 
           const restoreAmt = (item.gramsPerPacket > 0) ? restoreQty * item.gramsPerPacket : restoreQty;
@@ -657,9 +687,23 @@ const DB = {
               const currentCost = p.costPrice || 0;
               const incomingCost = item.buyingPrice || currentCost;
               const newStock = currentStock + incomingQty;
-              const weightedCost = newStock > 0
-                ? ((currentStock * currentCost) + (incomingQty * incomingCost)) / newStock
-                : incomingCost;
+              const gpp = p.packetSizeGrams || 0;
+              let actualIncomingCostPerPacket = incomingCost;
+              if (gpp > 0) {
+                 actualIncomingCostPerPacket = incomingCost * (gpp / 1000);
+              }
+              
+              let weightedCost = actualIncomingCostPerPacket;
+              if (newStock > 0) {
+                if (gpp > 0) {
+                   const currentPackets = currentStock / gpp;
+                   const incomingPackets = incomingQty / gpp;
+                   const newPackets = newStock / gpp;
+                   weightedCost = ((currentPackets * currentCost) + (incomingPackets * actualIncomingCostPerPacket)) / newPackets;
+                } else {
+                   weightedCost = ((currentStock * currentCost) + (incomingQty * actualIncomingCostPerPacket)) / newStock;
+                }
+              }
 
               await this.db.products.update(item.productId, {
                 stock: newStock,
@@ -765,7 +809,10 @@ const DB = {
               if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + item.quantity });
             } else {
               const p = await this.db.products.get(item.productId);
-              if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + item.quantity });
+              if (p) {
+                const addBack = (p.packetSizeGrams || 0) > 0 ? item.quantity * p.packetSizeGrams : item.quantity;
+                await this.db.products.update(item.productId, { stock: (p.stock || 0) + addBack });
+              }
             }
           }
         }
@@ -837,8 +884,10 @@ const DB = {
             : (p.costPrice || 0);
           const quantity = adj.quantity || 0;
           const lossQty = adj.type === 'in' ? 0 : Math.min(quantity, currentStock);
+          const gpp = p.packetSizeGrams || 0;
+          const lossPackets = gpp > 0 ? (lossQty / gpp) : lossQty;
           adj.costPrice = costPrice;
-          adj.lossAmount = lossQty * costPrice;
+          adj.lossAmount = lossPackets * costPrice;
         }
 
         const id = await this.db.stockAdjustments.add(adj);
@@ -970,15 +1019,19 @@ const DB = {
     if (newStatus === 'cleared')   update.clearedDate   = now;
     if (newStatus === 'bounced')   update.bouncedDate   = now;
 
-    if (newStatus === 'bounced' && cheque.customerId) {
-      // Reverse the balance reduction: add bounced amount back to customer
-      return await this.db.transaction('rw', this.db.cheques, this.db.customers, async () => {
+    if (newStatus === 'bounced') {
+      return await this.db.transaction('rw', this.db.cheques, this.db.customers, this.db.sales, async () => {
         await this.db.cheques.update(id, update);
-        const c = await this.db.customers.get(cheque.customerId);
-        if (c) {
-          await this.db.customers.update(cheque.customerId, {
-            balance: (c.balance || 0) + (cheque.amount || 0)
-          });
+        if (cheque.customerId) {
+          const c = await this.db.customers.get(cheque.customerId);
+          if (c) {
+            await this.db.customers.update(cheque.customerId, {
+              balance: (c.balance || 0) + (cheque.amount || 0)
+            });
+          }
+        }
+        if (cheque.saleId) {
+          await this.db.sales.update(cheque.saleId, { status: 'bounced' });
         }
       });
     }
@@ -1134,14 +1187,14 @@ const DB = {
     const start = Utils.startOfDay(date);
     const end = Utils.endOfDay(date);
     const sales = await this.db.sales.where('createdAt').between(start, end, true, true).toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
 
   async getMonthlySales(year, month) {
     const start = new Date(year, month, 1);
     const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
     const sales = await this.db.sales.where('createdAt').between(start, end, true, true).toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
 
   // ======= DATA EXPORT/IMPORT =======
