@@ -1,6 +1,6 @@
 {
   "name": "supiri-karawala",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Offline Supiri Karawala POS Software",
   "main": "main.js",
   "scripts": {
