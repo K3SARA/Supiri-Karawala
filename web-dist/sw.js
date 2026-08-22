@@ -1,4 +1,4 @@
-const CACHE_NAME = 'supiri-karawala-v4';
+const CACHE_NAME = 'supiri-karawala-1784390099682';
 const ASSETS = [
   "./",
   "index.html",
@@ -20,6 +20,7 @@ const ASSETS = [
   "js/pages/billing.js",
   "js/pages/bills.js",
   "js/pages/categories.js",
+  "js/pages/cheques.js",
   "js/pages/customers.js",
   "js/pages/dashboard.js",
   "js/pages/expenses.js",

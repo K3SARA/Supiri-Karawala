@@ -93,7 +93,7 @@ const ProfitPage = {
           ]
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
-          scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } }, x: { grid: { display: false } } } }
+          scales: { y: { beginAtZero: true, suggestedMax: 1000, grid: { color: 'rgba(0,0,0,0.04)' } }, x: { grid: { display: false } } } }
       });
     } catch(e) {}
 

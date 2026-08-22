@@ -26,6 +26,9 @@ const DB = {
       users: '++id, username, role',
       settings: 'key'
     });
+    this.db.version(2).stores({
+      cheques: '++id, paymentId, customerId, supplierId, saleId, chequeNumber, bankName, status, dueDate, receivedDate, createdAt'
+    });
     await this.db.open();
 
     // Read cloud settings before initialization
@@ -104,6 +107,56 @@ const DB = {
     await this.setSetting(migrationKey, 'print-care-plus-empty-inventory-2026-05-24');
   },
 
+  async resetToKarawalaProducts() {
+    const migrationKey = 'karawalaProductsV1';
+    if (await this.getSetting(migrationKey) === 'done') return;
+
+    await this.db.transaction('rw', this.db.products, this.db.categories, this.db.variations, async () => {
+      await this.db.variations.clear();
+      await this.db.products.clear();
+      await this.db.categories.clear();
+    });
+
+    const cats = {};
+    cats['Karawala'] = await this.db.categories.add({ name: 'Karawala' });
+    cats['Sprats']   = await this.db.categories.add({ name: 'Sprats' });
+    cats['Spices']   = await this.db.categories.add({ name: 'Spices' });
+    cats['Other']    = await this.db.categories.add({ name: 'Other' });
+
+    const items = [
+      { name: 'Balaya',          barcode: 'KW001', categoryId: cats['Karawala'] },
+      { name: 'Linna',           barcode: 'KW002', categoryId: cats['Karawala'] },
+      { name: 'Kukula',          barcode: 'KW003', categoryId: cats['Karawala'] },
+      { name: 'Keerameen',       barcode: 'KW004', categoryId: cats['Karawala'] },
+      { name: 'Katthah',         barcode: 'KW005', categoryId: cats['Karawala'] },
+      { name: 'Lanka Keegan',    barcode: 'KW006', categoryId: cats['Karawala'] },
+      { name: 'Koonisso',        barcode: 'KW007', categoryId: cats['Karawala'] },
+      { name: 'Bombilly',        barcode: 'KW008', categoryId: cats['Karawala'] },
+      { name: 'Lena Paraw',      barcode: 'KW009', categoryId: cats['Karawala'] },
+      { name: 'Sparts Lanka',    barcode: 'SP001', categoryId: cats['Sprats']   },
+      { name: 'Sparts Iran',     barcode: 'SP002', categoryId: cats['Sprats']   },
+      { name: 'Sparts Thailand', barcode: 'SP003', categoryId: cats['Sprats']   },
+      { name: 'Chilly P',        barcode: 'SC001', categoryId: cats['Spices']   },
+      { name: 'Masala',          barcode: 'SC002', categoryId: cats['Spices']   },
+      { name: 'R. Masala',       barcode: 'SC003', categoryId: cats['Spices']   },
+      { name: 'Cutter P',        barcode: 'SC004', categoryId: cats['Spices']   },
+      { name: 'Safroon',         barcode: 'SC005', categoryId: cats['Spices']   },
+      { name: 'Cumin Sheed P',   barcode: 'SC006', categoryId: cats['Spices']   },
+      { name: 'Temric',          barcode: 'SC007', categoryId: cats['Spices']   },
+      { name: 'Kiri Moru',       barcode: 'OT001', categoryId: cats['Other']    },
+      { name: 'Hurullo',         barcode: 'OT002', categoryId: cats['Other']    },
+    ];
+
+    for (const item of items) {
+      await this.db.products.add({
+        ...item,
+        sellingPrice: 0, costPrice: 0, stock: 0, reorderLevel: 5, createdAt: new Date()
+      });
+    }
+
+    await this.setSetting(migrationKey, 'done');
+  },
+
   async initCloudSync() {
     const isLocalFile = location.protocol === 'file:';
     const hasOverride = this._cloudEnabledOverride && this._cloudUrl;
@@ -172,7 +225,8 @@ const DB = {
       'getPurchases','getPurchase','getPurchaseItems','getReturns','getReturnItems',
       'getStockAdjustments','getExpenses','getExpense','getPayments','getUsers','getUser',
       'getUserByUsername','getSetting','getAllSettings','getLowStockProducts',
-      'getDailySales','getMonthlySales'
+      'getDailySales','getMonthlySales','getCheques','getChequeById','getChequeSummary',
+      'getCustomerChequeStats'
     ];
     const writeMethods = [
       'addProduct','updateProduct','deleteProduct','addCategory','updateCategory',
@@ -180,6 +234,7 @@ const DB = {
       'updateCustomer','deleteCustomer','addSupplier','updateSupplier','deleteSupplier',
       'addSale','updateSale','voidSale','addPurchase','reversePurchase','addReturn',
       'addStockAdjustment','addExpense','updateExpense','deleteExpense','addPayment',
+      'addCheque','updateCheque','updateChequeStatus','deleteCheque','addPaymentWithCheque',
       'addUser','updateUser','deleteUser','ensureDefaultUserAccounts','setSetting','importData',
       'applyBusinessProfile','seedIfEmpty'
     ];
@@ -289,9 +344,9 @@ const DB = {
     if (await this.getSetting(migrationKey) === 'print-care-plus-2026-05') return;
 
     await this.db.settings.bulkPut([
-      { key: 'shopName', value: 'Supiri Karawala' },
-      { key: 'shopAddress', value: 'Daulagala Handassa' },
-      { key: 'shopPhone', value: '077 944 5144' },
+      { key: 'shopName', value: 'SLS' },
+      { key: 'shopAddress', value: 'General merchants & wholesale and retail dealers in rice, oil, dried fish, prawns, bomba duck, golden anchovy and all kinds of fish products.' },
+      { key: 'shopPhone', value: '' },
       { key: migrationKey, value: 'print-care-plus-2026-05' }
     ]);
   },
@@ -376,16 +431,18 @@ const DB = {
 
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (!v || (v.stock || 0) < item.quantity) {
+            const vDeduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
+            if (!v || (v.stock || 0) < vDeduction) {
               throw new Error(`Insufficient stock for variation ${item.variationId}`);
             }
-            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - item.quantity });
+            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - vDeduction });
           } else {
             const p = await this.db.products.get(item.productId);
-            if (!p || (p.stock || 0) < item.quantity) {
-              throw new Error(`Insufficient stock for product ${item.productId}`);
+            const deduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
+            if (!p || (p.stock || 0) < deduction) {
+              throw new Error(`Insufficient stock for ${p?.name || 'product'}`);
             }
-            await this.db.products.update(item.productId, { stock: (p.stock || 0) - item.quantity });
+            await this.db.products.update(item.productId, { stock: Math.max(0, (p.stock || 0) - deduction) });
           }
         }
 
@@ -441,12 +498,13 @@ const DB = {
         const oldItems = await this.db.saleItems.where('saleId').equals(saleId).toArray();
 
         for (const item of oldItems) {
+          const restoreAmt = (item.gramsPerPacket > 0) ? (item.quantity || 0) * item.gramsPerPacket : (item.quantity || 0);
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + (item.quantity || 0) });
+            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + restoreAmt });
           } else {
             const p = await this.db.products.get(item.productId);
-            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + (item.quantity || 0) });
+            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + restoreAmt });
           }
         }
 
@@ -471,16 +529,18 @@ const DB = {
 
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (!v || (v.stock || 0) < item.quantity) {
+            const vDeduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
+            if (!v || (v.stock || 0) < vDeduction) {
               throw new Error(`Insufficient stock for variation ${item.variationId}`);
             }
-            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - item.quantity });
+            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - vDeduction });
           } else {
+            const deduction = (item.gramsPerPacket > 0) ? item.quantity * item.gramsPerPacket : item.quantity;
             const p = await this.db.products.get(item.productId);
-            if (!p || (p.stock || 0) < item.quantity) {
-              throw new Error(`Insufficient stock for product ${item.productId}`);
+            if (!p || (p.stock || 0) < deduction) {
+              throw new Error(`Insufficient stock for ${p?.name || 'product'}`);
             }
-            await this.db.products.update(item.productId, { stock: (p.stock || 0) - item.quantity });
+            await this.db.products.update(item.productId, { stock: (p.stock || 0) - deduction });
           }
         }
 
@@ -542,12 +602,13 @@ const DB = {
           const restoreQty = Math.max(0, (item.quantity || 0) - returnQty);
           if (restoreQty <= 0) continue;
 
+          const restoreAmt = (item.gramsPerPacket > 0) ? restoreQty * item.gramsPerPacket : restoreQty;
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + restoreQty });
+            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + restoreAmt });
           } else {
             const p = await this.db.products.get(item.productId);
-            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + restoreQty });
+            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + restoreAmt });
           }
         }
 
@@ -879,6 +940,119 @@ const DB = {
     );
   },
 
+  // ======= CHEQUES =======
+  async getCheques() { return await this.db.cheques.orderBy('createdAt').reverse().toArray(); },
+  async getChequeById(id) { return await this.db.cheques.get(id); },
+
+  async addCheque(data) {
+    const now = new Date().toISOString();
+    return await this.db.cheques.add({ ...data, status: data.status || 'pending', createdAt: now, updatedAt: now });
+  },
+
+  async updateCheque(id, data) {
+    return await this.db.cheques.update(id, { ...data, updatedAt: new Date().toISOString() });
+  },
+
+  async updateChequeStatus(id, newStatus) {
+    const cheque = await this.db.cheques.get(id);
+    if (!cheque) throw new Error('Cheque not found');
+    // Guard invalid transitions
+    if (cheque.status === 'cleared' || cheque.status === 'cancelled') {
+      throw new Error(`Cannot change status from ${cheque.status}`);
+    }
+    if (cheque.status === 'bounced' && newStatus !== 'pending') {
+      throw new Error('A bounced cheque can only be re-presented (set back to Pending)');
+    }
+
+    const now = new Date().toISOString();
+    const update = { status: newStatus, updatedAt: now };
+    if (newStatus === 'deposited') update.depositedDate = now;
+    if (newStatus === 'cleared')   update.clearedDate   = now;
+    if (newStatus === 'bounced')   update.bouncedDate   = now;
+
+    if (newStatus === 'bounced' && cheque.customerId) {
+      // Reverse the balance reduction: add bounced amount back to customer
+      return await this.db.transaction('rw', this.db.cheques, this.db.customers, async () => {
+        await this.db.cheques.update(id, update);
+        const c = await this.db.customers.get(cheque.customerId);
+        if (c) {
+          await this.db.customers.update(cheque.customerId, {
+            balance: (c.balance || 0) + (cheque.amount || 0)
+          });
+        }
+      });
+    }
+
+    return await this.db.cheques.update(id, update);
+  },
+
+  async deleteCheque(id) {
+    const cheque = await this.db.cheques.get(id);
+    if (!cheque) return;
+    if (cheque.status === 'cleared') throw new Error('Cannot delete a cleared cheque');
+    return await this.db.cheques.delete(id);
+  },
+
+  // Records a customer payment and its cheque together as one atomic operation,
+  // so a failure partway through never leaves a balance change with no cheque record.
+  async addPaymentWithCheque(payment, chequeData) {
+    return await this.db.transaction(
+      'rw',
+      this.db.payments,
+      this.db.customers,
+      this.db.sales,
+      this.db.cheques,
+      async () => {
+        const paymentId = await this.addPayment(payment);
+        const chequeId = await this.addCheque({ ...chequeData, paymentId });
+        return { paymentId, chequeId };
+      }
+    );
+  },
+
+  async getChequeSummary() {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const tomorrow   = new Date(todayStart); tomorrow.setDate(tomorrow.getDate() + 1);
+    const in3Days    = new Date(todayStart); in3Days.setDate(in3Days.getDate() + 4);
+
+    const all     = await this.db.cheques.toArray();
+    const pending = all.filter(c => c.status === 'pending');
+    const bounced = all.filter(c => c.status === 'bounced');
+
+    const dueToday = pending.filter(c => {
+      const d = new Date(c.dueDate); d.setHours(0, 0, 0, 0);
+      return d.getTime() === todayStart.getTime();
+    });
+    const dueSoon = pending.filter(c => {
+      const d = new Date(c.dueDate); d.setHours(0, 0, 0, 0);
+      return d >= tomorrow && d < in3Days;
+    });
+    const overdue = pending.filter(c => {
+      const d = new Date(c.dueDate); d.setHours(0, 0, 0, 0);
+      return d < todayStart;
+    });
+
+    const sum = arr => arr.reduce((s, c) => s + (c.amount || 0), 0);
+    return { pending, pendingAmount: sum(pending), dueToday, dueTodayAmount: sum(dueToday), dueSoon, dueSoonAmount: sum(dueSoon), overdue, overdueAmount: sum(overdue), bounced, bouncedAmount: sum(bounced) };
+  },
+
+  async getCustomerChequeStats(customerId) {
+    const all     = await this.db.cheques.where('customerId').equals(customerId).toArray();
+    const passed  = all.filter(c => c.status === 'deposited' || c.status === 'cleared');
+    const pending = all.filter(c => c.status === 'pending');
+    const bounced = all.filter(c => c.status === 'bounced');
+    const sum = arr => arr.reduce((s, c) => s + (c.amount || 0), 0);
+    return {
+      totalCount:    all.length,
+      passedCount:   passed.length,
+      pendingCount:  pending.length,
+      bouncedCount:  bounced.length,
+      passedAmount:  sum(passed),
+      pendingAmount: sum(pending),
+      bouncedAmount: sum(bounced),
+    };
+  },
+
   // ======= USERS =======
   async getUsers() { return await this.db.users.toArray(); },
   async getUser(id) { return await this.db.users.get(id); },
@@ -948,7 +1122,11 @@ const DB = {
   // ======= LOW STOCK =======
   async getLowStockProducts() {
     const products = await this.db.products.toArray();
-    return products.filter(p => (p.stock || 0) <= (p.reorderLevel || 5));
+    return products.filter(p => {
+      const gpp = p.packetSizeGrams || 0;
+      if (gpp > 0) return Math.floor((p.stock || 0) / gpp) <= (p.reorderLevel || 5);
+      return (p.stock || 0) <= (p.reorderLevel || 5);
+    });
   },
 
   // ======= REPORTS HELPERS =======
@@ -971,7 +1149,7 @@ const DB = {
     const data = {};
     const tables = ['products','categories','variations','customers','suppliers',
       'sales','saleItems','purchases','purchaseItems','returns','returnItems',
-      'stockAdjustments','expenses','payments','users','settings'];
+      'stockAdjustments','expenses','payments','users','settings','cheques'];
     for (const t of tables) {
       data[t] = await this.db[t].toArray();
     }
@@ -981,7 +1159,7 @@ const DB = {
   async importData(data) {
     const tables = ['settings','users','categories','products','variations','customers',
       'suppliers','sales','saleItems','purchases','purchaseItems','returns','returnItems',
-      'stockAdjustments','expenses','payments'];
+      'stockAdjustments','expenses','payments','cheques'];
     await this.db.transaction('rw', ...tables.map(t => this.db[t]), async () => {
       for (const t of tables) {
         await this.db[t].clear();
@@ -1013,91 +1191,47 @@ const DB = {
       { key: 'labelPrinter', value: '' },
       { key: 'receiptPrinter', value: '' },
       { key: 'a4Printer', value: '' },
+      { key: 'a5Printer', value: '' },
       { key: 'businessProfileVersion', value: 'print-care-plus-2026-05' }
     ]);
 
     await this.ensureDefaultUserAccounts();
 
     // Categories
-    const cats = [
-      { name: 'Pens' }, { name: 'Pencils' }, { name: 'Books' },
-      { name: 'Notebooks' }, { name: 'Art Supplies' }, { name: 'Office Items' },
-      { name: 'School Items' }, { name: 'Paper' }, { name: 'Files' },
-      { name: 'Markers' }, { name: 'Erasers' }, { name: 'Rulers' }
-    ];
     const catIds = {};
-    for (const c of cats) {
-      catIds[c.name] = await this.db.categories.add(c);
-    }
+    catIds['Karawala'] = await this.db.categories.add({ name: 'Karawala' });
+    catIds['Sprats']   = await this.db.categories.add({ name: 'Sprats' });
+    catIds['Spices']   = await this.db.categories.add({ name: 'Spices' });
+    catIds['Other']    = await this.db.categories.add({ name: 'Other' });
 
-    // Sample products
+    // Default products
     const products = [
-      { name: 'Pilot G2 Blue', barcode: '100001', categoryId: catIds['Pens'], brand: 'Pilot', sellingPrice: 350, costPrice: 250, stock: 50, reorderLevel: 10, emoji: '🖊️' },
-      { name: 'Pilot G2 Black', barcode: '100002', categoryId: catIds['Pens'], brand: 'Pilot', sellingPrice: 350, costPrice: 250, stock: 45, reorderLevel: 10, emoji: '🖊️' },
-      { name: 'Pilot G2 Red', barcode: '100003', categoryId: catIds['Pens'], brand: 'Pilot', sellingPrice: 350, costPrice: 250, stock: 30, reorderLevel: 10, emoji: '🖊️' },
-      { name: 'BIC Crystal Blue', barcode: '100004', categoryId: catIds['Pens'], brand: 'BIC', sellingPrice: 75, costPrice: 45, stock: 100, reorderLevel: 20, emoji: '🖊️' },
-      { name: 'BIC Crystal Black', barcode: '100005', categoryId: catIds['Pens'], brand: 'BIC', sellingPrice: 75, costPrice: 45, stock: 80, reorderLevel: 20, emoji: '🖊️' },
-      { name: 'Uni-ball Signo', barcode: '100006', categoryId: catIds['Pens'], brand: 'Uni', sellingPrice: 450, costPrice: 320, stock: 25, reorderLevel: 5, emoji: '🖊️' },
-      { name: 'Atlas Chooty Pen', barcode: '100007', categoryId: catIds['Pens'], brand: 'Atlas', sellingPrice: 25, costPrice: 15, stock: 200, reorderLevel: 50, emoji: '🖊️' },
-
-      { name: 'HB Pencil', barcode: '200001', categoryId: catIds['Pencils'], brand: 'Atlas', sellingPrice: 20, costPrice: 12, stock: 300, reorderLevel: 50, emoji: '✏️' },
-      { name: '2B Pencil', barcode: '200002', categoryId: catIds['Pencils'], brand: 'Atlas', sellingPrice: 25, costPrice: 15, stock: 200, reorderLevel: 40, emoji: '✏️' },
-      { name: 'Mechanical Pencil 0.5mm', barcode: '200003', categoryId: catIds['Pencils'], brand: 'Pentel', sellingPrice: 280, costPrice: 180, stock: 40, reorderLevel: 10, emoji: '✏️' },
-      { name: 'Colored Pencils 12 Pack', barcode: '200004', categoryId: catIds['Pencils'], brand: 'Faber-Castell', sellingPrice: 650, costPrice: 450, stock: 20, reorderLevel: 5, emoji: '✏️' },
-
-      { name: 'CR Book 200 Pages', barcode: '300001', categoryId: catIds['Books'], brand: 'Atlas', sellingPrice: 180, costPrice: 130, stock: 60, reorderLevel: 15, emoji: '📚' },
-      { name: 'CR Book 400 Pages', barcode: '300002', categoryId: catIds['Books'], brand: 'Atlas', sellingPrice: 320, costPrice: 240, stock: 40, reorderLevel: 10, emoji: '📚' },
-      { name: 'Square Ruled Book', barcode: '300003', categoryId: catIds['Books'], brand: 'Atlas', sellingPrice: 150, costPrice: 100, stock: 55, reorderLevel: 15, emoji: '📚' },
-
-      { name: 'A4 Notebook 80 Pages', barcode: '400001', categoryId: catIds['Notebooks'], brand: 'Promate', sellingPrice: 220, costPrice: 150, stock: 35, reorderLevel: 10, emoji: '📓' },
-      { name: 'A4 Notebook 120 Pages', barcode: '400002', categoryId: catIds['Notebooks'], brand: 'Promate', sellingPrice: 320, costPrice: 220, stock: 25, reorderLevel: 8, emoji: '📓' },
-      { name: 'A5 Notebook Spiral', barcode: '400003', categoryId: catIds['Notebooks'], brand: 'Promate', sellingPrice: 180, costPrice: 120, stock: 40, reorderLevel: 10, emoji: '📓' },
-
-      { name: 'Watercolor Set 12', barcode: '500001', categoryId: catIds['Art Supplies'], brand: 'Faber-Castell', sellingPrice: 850, costPrice: 600, stock: 15, reorderLevel: 5, emoji: '🎨' },
-      { name: 'Oil Pastel 24 Colors', barcode: '500002', categoryId: catIds['Art Supplies'], brand: 'Faber-Castell', sellingPrice: 950, costPrice: 680, stock: 12, reorderLevel: 3, emoji: '🎨' },
-      { name: 'Paint Brush Set', barcode: '500003', categoryId: catIds['Art Supplies'], brand: 'Generic', sellingPrice: 450, costPrice: 280, stock: 20, reorderLevel: 5, emoji: '🎨' },
-      { name: 'Sketch Pad A4', barcode: '500004', categoryId: catIds['Art Supplies'], brand: 'Generic', sellingPrice: 380, costPrice: 250, stock: 18, reorderLevel: 5, emoji: '🎨' },
-
-      { name: 'Stapler', barcode: '600001', categoryId: catIds['Office Items'], brand: 'Kangaro', sellingPrice: 550, costPrice: 380, stock: 15, reorderLevel: 5, emoji: '📎' },
-      { name: 'Stapler Pins Box', barcode: '600002', categoryId: catIds['Office Items'], brand: 'Kangaro', sellingPrice: 120, costPrice: 70, stock: 50, reorderLevel: 15, emoji: '📎' },
-      { name: 'Paper Clips Box', barcode: '600003', categoryId: catIds['Office Items'], brand: 'Generic', sellingPrice: 80, costPrice: 45, stock: 60, reorderLevel: 15, emoji: '📎' },
-      { name: 'Scotch Tape', barcode: '600004', categoryId: catIds['Office Items'], brand: '3M', sellingPrice: 180, costPrice: 120, stock: 30, reorderLevel: 10, emoji: '📎' },
-      { name: 'Scissors Large', barcode: '600005', categoryId: catIds['Office Items'], brand: 'Generic', sellingPrice: 350, costPrice: 220, stock: 20, reorderLevel: 5, emoji: '✂️' },
-      { name: 'Glue Stick', barcode: '600006', categoryId: catIds['Office Items'], brand: 'UHU', sellingPrice: 150, costPrice: 95, stock: 40, reorderLevel: 10, emoji: '🧴' },
-
-      { name: 'School Bag Blue', barcode: '700001', categoryId: catIds['School Items'], brand: 'Generic', sellingPrice: 2500, costPrice: 1800, stock: 8, reorderLevel: 3, emoji: '🎒' },
-      { name: 'Geometry Box', barcode: '700002', categoryId: catIds['School Items'], brand: 'Maped', sellingPrice: 650, costPrice: 420, stock: 20, reorderLevel: 5, emoji: '📐' },
-      { name: 'Lunch Box', barcode: '700003', categoryId: catIds['School Items'], brand: 'Generic', sellingPrice: 800, costPrice: 550, stock: 12, reorderLevel: 3, emoji: '🍱' },
-
-      { name: 'A4 Paper Ream', barcode: '800001', categoryId: catIds['Paper'], brand: 'IK', sellingPrice: 1200, costPrice: 950, stock: 25, reorderLevel: 5, emoji: '📄' },
-      { name: 'Color Paper Pack', barcode: '800002', categoryId: catIds['Paper'], brand: 'Generic', sellingPrice: 350, costPrice: 220, stock: 15, reorderLevel: 5, emoji: '📄' },
-
-      { name: 'Document File A4', barcode: '900001', categoryId: catIds['Files'], brand: 'Promate', sellingPrice: 250, costPrice: 160, stock: 30, reorderLevel: 10, emoji: '📁' },
-      { name: 'L-Shape Folder Clear', barcode: '900002', categoryId: catIds['Files'], brand: 'Generic', sellingPrice: 45, costPrice: 25, stock: 100, reorderLevel: 25, emoji: '📁' },
-      { name: 'Box File', barcode: '900003', categoryId: catIds['Files'], brand: 'Generic', sellingPrice: 480, costPrice: 320, stock: 15, reorderLevel: 5, emoji: '📁' },
-
-      { name: 'Whiteboard Marker Blue', barcode: '1000001', categoryId: catIds['Markers'], brand: 'Artline', sellingPrice: 280, costPrice: 180, stock: 35, reorderLevel: 10, emoji: '🖍️' },
-      { name: 'Highlighter Yellow', barcode: '1000002', categoryId: catIds['Markers'], brand: 'Stabilo', sellingPrice: 250, costPrice: 160, stock: 30, reorderLevel: 8, emoji: '🖍️' },
-      { name: 'Permanent Marker Blk', barcode: '1000003', categoryId: catIds['Markers'], brand: 'Artline', sellingPrice: 320, costPrice: 210, stock: 25, reorderLevel: 8, emoji: '🖍️' },
-
-      { name: 'Eraser Large', barcode: '1100001', categoryId: catIds['Erasers'], brand: 'Pelikan', sellingPrice: 40, costPrice: 22, stock: 150, reorderLevel: 30, emoji: '🧹' },
-      { name: 'Eraser Small', barcode: '1100002', categoryId: catIds['Erasers'], brand: 'Pelikan', sellingPrice: 20, costPrice: 10, stock: 200, reorderLevel: 50, emoji: '🧹' },
-
-      { name: 'Plastic Ruler 30cm', barcode: '1200001', categoryId: catIds['Rulers'], brand: 'Maped', sellingPrice: 80, costPrice: 45, stock: 60, reorderLevel: 15, emoji: '📏' },
-      { name: 'Steel Ruler 30cm', barcode: '1200002', categoryId: catIds['Rulers'], brand: 'Generic', sellingPrice: 220, costPrice: 140, stock: 20, reorderLevel: 5, emoji: '📏' },
+      { name: 'Balaya',          barcode: 'KW001', categoryId: catIds['Karawala'] },
+      { name: 'Linna',           barcode: 'KW002', categoryId: catIds['Karawala'] },
+      { name: 'Kukula',          barcode: 'KW003', categoryId: catIds['Karawala'] },
+      { name: 'Keerameen',       barcode: 'KW004', categoryId: catIds['Karawala'] },
+      { name: 'Katthah',         barcode: 'KW005', categoryId: catIds['Karawala'] },
+      { name: 'Lanka Keegan',    barcode: 'KW006', categoryId: catIds['Karawala'] },
+      { name: 'Koonisso',        barcode: 'KW007', categoryId: catIds['Karawala'] },
+      { name: 'Bombilly',        barcode: 'KW008', categoryId: catIds['Karawala'] },
+      { name: 'Lena Paraw',      barcode: 'KW009', categoryId: catIds['Karawala'] },
+      { name: 'Sparts Lanka',    barcode: 'SP001', categoryId: catIds['Sprats']   },
+      { name: 'Sparts Iran',     barcode: 'SP002', categoryId: catIds['Sprats']   },
+      { name: 'Sparts Thailand', barcode: 'SP003', categoryId: catIds['Sprats']   },
+      { name: 'Chilly P',        barcode: 'SC001', categoryId: catIds['Spices']   },
+      { name: 'Masala',          barcode: 'SC002', categoryId: catIds['Spices']   },
+      { name: 'R. Masala',       barcode: 'SC003', categoryId: catIds['Spices']   },
+      { name: 'Cutter P',        barcode: 'SC004', categoryId: catIds['Spices']   },
+      { name: 'Safroon',         barcode: 'SC005', categoryId: catIds['Spices']   },
+      { name: 'Cumin Sheed P',   barcode: 'SC006', categoryId: catIds['Spices']   },
+      { name: 'Temric',          barcode: 'SC007', categoryId: catIds['Spices']   },
+      { name: 'Kiri Moru',       barcode: 'OT001', categoryId: catIds['Other']    },
+      { name: 'Hurullo',         barcode: 'OT002', categoryId: catIds['Other']    },
     ];
 
     for (const p of products) {
-      p.createdAt = new Date();
-      await this.db.products.add(p);
+      await this.db.products.add({ ...p, sellingPrice: 0, costPrice: 0, stock: 0, reorderLevel: 5, createdAt: new Date() });
     }
-
-    // Sample suppliers
-    await this.db.suppliers.bulkAdd([
-      { name: 'Atlas Stationary Ltd', phone: '+94 11 222 3333', email: 'sales@atlas.lk', address: 'Colombo 10', createdAt: new Date() },
-      { name: 'Promate Lanka', phone: '+94 11 444 5555', email: 'orders@promate.lk', address: 'Nugegoda', createdAt: new Date() },
-      { name: 'Faber-Castell Distributor', phone: '+94 77 888 9999', email: 'dist@faber.lk', address: 'Maharagama', createdAt: new Date() },
-    ]);
 
     // Sample customers
     await this.db.customers.bulkAdd([

@@ -41,10 +41,14 @@ const Receipt = {
     Modal.show({
       title: 'Select Receipt Size',
       content: `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
           <button class="btn btn-outline" id="receiptFormatA4" style="height:86px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
             <strong>A4</strong>
             <span style="font-size:12px;color:var(--text-secondary)">Open A4 template</span>
+          </button>
+          <button class="btn btn-outline" id="receiptFormatA5" style="height:86px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
+            <strong>A5</strong>
+            <span style="font-size:12px;color:var(--text-secondary)">Open A5 template</span>
           </button>
           <button class="btn btn-outline" id="receiptFormat80" style="height:86px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
             <strong>80mm</strong>
@@ -58,6 +62,10 @@ const Receipt = {
     document.getElementById('receiptFormatA4').addEventListener('click', () => {
       Modal.close();
       action('a4');
+    });
+    document.getElementById('receiptFormatA5').addEventListener('click', () => {
+      Modal.close();
+      action('a5');
     });
     document.getElementById('receiptFormat80').addEventListener('click', () => {
       Modal.close();
@@ -226,10 +234,10 @@ const Receipt = {
           ${sale.tax > 0 ? `<div class="total-row"><span>Tax:</span><span>LKR ${Utils.currencyPlain(sale.tax)}</span></div>` : ''}
           <div class="total-row grand"><span>Total:</span><span>LKR ${Utils.currencyPlain(sale.total)}</span></div>
           <div class="total-row"><span class="label">Payment:</span><span>${this.paymentLabel(sale.paymentMethod)}</span></div>
-          <div class="total-row"><span>Cash Paid:</span><span>LKR ${Utils.currencyPlain(sale.amountPaid)}</span></div>
-          <div class="total-row"><span class="label">Balance:</span><span>LKR ${Utils.currencyPlain(sale.change || 0)}</span></div>
-          ${sale.dueAmount > 0 ? `<div class="total-row grand"><span>Due:</span><span>LKR ${Utils.currencyPlain(sale.dueAmount)}</span></div>` : ''}
-          <div class="total-row"><span>Total Items:</span><span>${receiptItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)}</span></div>
+          <div class="total-row grand"><span>Paid:</span><span>LKR ${Utils.currencyPlain(sale.amountPaid || 0)}</span></div>
+          ${(sale.change || 0) > 0 ? `<div class="total-row grand"><span>Balance:</span><span>LKR ${Utils.currencyPlain(sale.change)}</span></div>` : ''}
+          <div class="total-row grand"><span>Due:</span><span>LKR ${Utils.currencyPlain(sale.dueAmount || 0)}</span></div>
+          <div class="total-row" style="margin-top: 4px;"><span>Total Items:</span><span>${receiptItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)}</span></div>
         </div>
         <div class="line"></div>
         <div class="footer">${Utils.escapeHtml(footer)}</div>
@@ -241,119 +249,434 @@ const Receipt = {
 
   async generateA4(sale, saleItems) {
     const settings = await DB.getAllSettings();
-    const shopName = settings.shopName || 'Supiri Karawala';
-    const shopAddress = settings.shopAddress || '';
-    const shopPhone = settings.shopPhone || '';
-    const shopEmail = settings.shopEmail || '';
-    const footer = settings.receiptFooter || 'Thank You, Please Come Again!';
-    const logo = new URL('assets/logo.png', window.location.href).href;
-    const customer = sale.customerId ? await DB.getCustomer(sale.customerId) : null;
-    const status = sale.status === 'voided' ? 'Voided' : ((sale.dueAmount || 0) > 0 ? 'Credit' : 'Paid');
+    let shopName = settings.shopName || 'SLS';
+    let shopDesc = (settings.shopAddress || '').replace(/\n/g, ' ');
+    if (shopName === 'Supiri Karawala') {
+      shopName = 'SLS';
+    }
+    if (!shopDesc || shopDesc === 'Daulagala Handassa') {
+      shopDesc = 'General merchants & wholesale and retail dealers in rice, oil, dried fish, prawns, bomba duck, golden anchovy and all kinds of fish products.';
+    }
 
-    const addressHtml = Utils.escapeHtml(shopAddress).replace(/\n/g, '<br>');
+    const customer = sale.customerId ? await DB.getCustomer(sale.customerId) : null;
+    const customerName = customer?.name || 'Walk-In Customer';
+    const dateText = sale.createdAt
+      ? new Date(sale.createdAt).toLocaleDateString('en-GB')
+      : new Date().toLocaleDateString('en-GB');
+
     const receiptItems = await this.getReceiptItems(sale, saleItems);
-    const itemRows = receiptItems.map((item, idx) => {
+
+    const MIN_ROWS = 20;
+    const itemRowsHtml = receiptItems.map((item, idx) => {
       const qty = item.quantity || 0;
       const price = item.price || 0;
-      const discount = item.discount || 0;
-      const total = item.total ?? (qty * price - discount);
-      return `
-        <tr>
-          <td class="center">${String(idx + 1).padStart(2, '0')}</td>
-          <td>${Utils.escapeHtml(item.name || 'Item')}</td>
-          <td class="center">${qty}</td>
-          <td class="right">${Utils.currencyPlain(price)}</td>
-          <td class="right">${Utils.currencyPlain(discount)}</td>
-          <td class="right">${Utils.currencyPlain(total)}</td>
-        </tr>
-      `;
+      const total = item.total ?? (qty * price - (item.discount || 0));
+      const rs = Math.floor(total);
+      const cts = Math.round((total - rs) * 100);
+      const gpp = item.gramsPerPacket || 0;
+      const qtyLabel = gpp > 0 ? `${qty}p` : qty;
+      const nameLabel = gpp > 0 ? `${Utils.escapeHtml(item.name || 'Item')} (${gpp}g)` : Utils.escapeHtml(item.name || 'Item');
+      return `<tr>
+        <td class="c-no">${idx + 1}</td>
+        <td class="c-desc">${nameLabel}</td>
+        <td class="c-qty">${qtyLabel}</td>
+        <td class="c-rate">${Utils.currencyPlain(price)}</td>
+        <td class="c-rs">${rs.toLocaleString('en-US')}</td>
+        <td class="c-cts">${cts.toString().padStart(2, '0')}</td>
+      </tr>`;
     }).join('');
 
-    return `<!doctype html>
+    const emptyCount = Math.max(0, MIN_ROWS - receiptItems.length);
+    const emptyRowsHtml = Array.from({ length: emptyCount }, () =>
+      `<tr><td class="c-no">&nbsp;</td><td class="c-desc"></td><td class="c-qty"></td><td class="c-rate"></td><td class="c-rs"></td><td class="c-cts"></td></tr>`
+    ).join('');
+
+    const discount = sale.discount || 0;
+    const total = sale.total || 0;
+    const payMethod = this.paymentLabel(sale.paymentMethod);
+
+    const extraInfoHtml = [
+      discount > 0 ? `Discount: -${Utils.currencyPlain(discount)}` : '',
+      (sale.tax || 0) > 0 ? `Tax: ${Utils.currencyPlain(sale.tax)}` : '',
+      `Payment: ${payMethod}`
+    ].filter(Boolean).join(' | ');
+
+    return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>${Utils.escapeHtml(shopName)} - A4 Receipt</title>
+<title>${Utils.escapeHtml(shopName)} - Invoice</title>
 <style>
-  @page { size: A4; margin: 16mm; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: Arial, Helvetica, sans-serif; background:#f6f8fa; color:#1f2933; }
-  .page { width: 210mm; min-height: 297mm; margin: 0 auto; padding:16mm; background:#f6f8fa; }
-  .sheet { background:#fff; min-height:265mm; border-radius:14px; overflow:hidden; box-shadow:0 8px 30px rgba(16,24,40,.08); }
-  .strip { display:grid; grid-template-columns:repeat(4,1fr); height:5mm; }
-  .c1{background:#00a6c8} .c2{background:#d9267d} .c3{background:#f4b400} .c4{background:#111827}
-  .inner { padding:12mm; }
-  .header { display:flex; justify-content:space-between; align-items:flex-start; gap:10mm; }
-  .brand { display:flex; gap:8mm; align-items:flex-start; }
-  .brand img { width:28mm; height:auto; }
-  h1 { margin:0; font-size:25px; letter-spacing:.3px; }
-  .muted { color:#667085; font-size:12px; line-height:1.6; }
-  .receipt-card { background:#111827; color:#fff; padding:8mm 13mm; border-radius:12px; text-align:center; min-width:56mm; }
-  .receipt-card h2 { margin:0 0 3mm; font-size:24px; }
-  .dots span { display:inline-block; width:5mm; height:5mm; border-radius:50%; margin:0 1.5mm; }
-  .info-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6mm; margin-top:12mm; }
-  .box { border:1px solid #d9dee7; border-radius:10px; overflow:hidden; }
-  .box .top { height:4mm; }
-  .box-content { padding:5mm; }
-  .box h3 { margin:0 0 4mm; font-size:12px; }
-  table { width:100%; border-collapse:collapse; margin-top:10mm; font-size:12px; }
-  th { background:#111827; color:white; padding:10px 8px; text-align:center; }
-  td { border:1px solid #d9dee7; padding:10px 8px; }
-  tbody tr:nth-child(even){ background:#fafbfc; }
-  .right { text-align:right; } .center { text-align:center; }
-  .bottom { display:grid; grid-template-columns:1.4fr 1fr; gap:10mm; margin-top:10mm; }
-  .note, .totals { border:1px solid #d9dee7; border-radius:10px; padding:6mm; }
-  .note { background:#f8fafc; }
-  .total-row { display:flex; justify-content:space-between; margin-bottom:5mm; color:#667085; }
-  .grand { background:#111827; color:white; border-radius:8px; padding:4mm; display:flex; justify-content:space-between; font-weight:bold; }
-  .signatures { display:flex; justify-content:space-between; margin-top:18mm; text-align:center; color:#667085; font-size:11px; }
-  .sig-line { border-top:1px solid #d9dee7; width:60mm; padding-top:3mm; }
-  .footer { margin-top:12mm; padding:4mm; background:#f2f4f7; border-radius:8px; text-align:center; color:#667085; font-size:11px; line-height:1.6; }
-  @media print { body,.page{background:white} .page{padding:0} .sheet{box-shadow:none;border-radius:0} }
+  @page { size: portrait; margin: 15mm 18mm 15mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #000; background: #fff; line-height: 1.3; padding: 0; }
+
+  .bill-container { width: 100%; max-width: 100%; display: flex; flex-direction: column; }
+
+  .hdr { text-align: center; margin-bottom: 20px; }
+  .hdr-name { font-size: 48px; font-weight: 900; font-family: 'Arial Black', Arial, sans-serif; color: #1b52c0; letter-spacing: 0.12em; line-height: 1.1; text-transform: uppercase; margin-bottom: 4px; }
+  .hdr-desc { font-size: 12px; color: #1b52c0; font-weight: normal; max-width: 90%; margin: 0 auto; line-height: 1.4; text-align: center; }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 15px;
+    font-size: 14px;
+    color: #1b52c0;
+    font-weight: bold;
+  }
+  .meta-customer { display: flex; flex: 1; align-items: flex-end; }
+  .meta-date { display: flex; width: 220px; align-items: flex-end; margin-left: 20px; }
+  .dotted-line {
+    border-bottom: 2px dotted #1b52c0;
+    flex: 1;
+    margin-left: 8px;
+    padding-bottom: 2px;
+    color: #000;
+    font-weight: normal;
+    font-size: 14px;
+    min-height: 20px;
+    text-align: left;
+  }
+
+  table.inv-table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+  table.inv-table th, table.inv-table td {
+    border: 1px solid #1b52c0;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  table.inv-table th {
+    background-color: #1b52c0;
+    color: #fff;
+    font-weight: bold;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  table.inv-table td {
+    height: 32px;
+    vertical-align: middle;
+    color: #000;
+  }
+  table.inv-table .c-no   { width: 6%; text-align: center; }
+  table.inv-table .c-desc { width: 54%; text-align: left; }
+  table.inv-table .c-qty  { width: 10%; text-align: center; }
+  table.inv-table .c-rate { width: 12%; text-align: right; }
+  table.inv-table .c-rs   { width: 13%; text-align: right; border-right: none; }
+  table.inv-table .c-cts  { width: 5%; text-align: center; border-left: none; position: relative; }
+  table.inv-table .c-cts::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-left: 1px solid #1b52c0;
+  }
+
+  table.inv-table tr.tfoot-row td {
+    border: none;
+    height: 36px;
+    vertical-align: middle;
+    padding-top: 6px;
+  }
+  table.inv-table tr.tfoot-row td.invoice-no-val {
+    color: #cc0000;
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    font-size: 20px;
+    text-align: left;
+    padding-left: 10px;
+    letter-spacing: 1px;
+  }
+  table.inv-table tr.tfoot-row td.extra-info-cell {
+    text-align: right;
+    font-size: 11px;
+    color: #555;
+    padding-right: 15px;
+    font-weight: normal;
+  }
+  table.inv-table tr.tfoot-row td.total-label {
+    text-align: right;
+    font-weight: bold;
+    font-size: 16px;
+    color: #1b52c0;
+    padding-right: 15px;
+  }
+  table.inv-table tr.tfoot-row td.total-box-cell {
+    border: 2px solid #1b52c0;
+    background-color: #fff;
+    text-align: right;
+    padding-right: 10px;
+    font-weight: bold;
+    font-size: 16px;
+    color: #000;
+  }
+
+  @media print {
+    body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 0; }
+  }
 </style>
 </head>
 <body>
-  <main class="page">
-    <section class="sheet">
-      <div class="strip"><div class="c1"></div><div class="c2"></div><div class="c3"></div><div class="c4"></div></div>
-      <div class="inner">
-        <div class="header">
-          <div class="brand">
-            <img src="${logo}" alt="${Utils.escapeHtml(shopName)} logo">
-            <div>
-              <h1>${Utils.escapeHtml(shopName)}</h1>
-              <div class="muted">Premium Dried Fish & Food Products<br>${addressHtml}${shopPhone ? `<br>Tel: ${Utils.escapeHtml(shopPhone)}` : ''}${shopEmail ? ` | Email: ${Utils.escapeHtml(shopEmail)}` : ''}</div>
-            </div>
-          </div>
-          <div class="receipt-card">
-            <h2>RECEIPT</h2>
-            <div style="font-size:11px">TAX / CASH BILL</div>
-            <div class="dots" style="margin-top:5mm"><span class="c1"></span><span class="c2"></span><span class="c3"></span></div>
-          </div>
-        </div>
-        <div class="info-grid">
-          <div class="box"><div class="top c1"></div><div class="box-content"><h3>BILL TO</h3><div class="muted">Customer Name: ${Utils.escapeHtml(customer?.name || 'Walk-in Customer')}<br>Phone: ${Utils.escapeHtml(customer?.phone || '-')}<br>Address: ${Utils.escapeHtml(customer?.address || '-')}</div></div></div>
-          <div class="box"><div class="top c2"></div><div class="box-content"><h3>RECEIPT DETAILS</h3><div class="muted">Invoice: ${Utils.escapeHtml(sale.invoiceNo || 'N/A')}<br>Date: ${Utils.formatDateTime(sale.createdAt)}<br>Cashier: ${Utils.escapeHtml(sale.cashierName || 'Admin')}</div></div></div>
-          <div class="box"><div class="top c3"></div><div class="box-content"><h3>PAYMENT</h3><div class="muted">Method: ${this.paymentLabel(sale.paymentMethod)}<br>Status: ${status}<br>Currency: LKR</div></div></div>
-        </div>
-        <table>
-          <thead><tr><th>#</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Discount</th><th>Total</th></tr></thead>
-          <tbody>${itemRows || '<tr><td colspan="6" class="center">No items</td></tr>'}</tbody>
-        </table>
-        <div class="bottom">
-          <div class="note"><b>Notes / Terms</b><div class="muted" style="margin-top:4mm">${Utils.escapeHtml(footer)}<br>Goods once sold are not returnable unless stated.<br>Please keep this receipt for future reference.<br>Powered by J&amp;co.</div></div>
-          <div class="totals">
-            <div class="total-row"><span>Sub Total</span><span>${Utils.currencyPlain(sale.subtotal || 0)}</span></div>
-            <div class="total-row"><span>Discount</span><span>${Utils.currencyPlain(sale.discount || 0)}</span></div>
-            <div class="total-row"><span>Tax</span><span>${Utils.currencyPlain(sale.tax || 0)}</span></div>
-            <div class="grand"><span>Grand Total</span><span>LKR ${Utils.currencyPlain(sale.total || 0)}</span></div>
-          </div>
-        </div>
-        <div class="signatures"><div class="sig-line">Customer Signature</div><div class="sig-line">Authorized Signature</div></div>
-        <div class="footer">This is a computer generated receipt.<br>${Utils.escapeHtml(shopName)}${shopAddress ? ` | ${Utils.escapeHtml(shopAddress).replace(/\n/g, ', ')}` : ''}${shopPhone ? ` | Tel: ${Utils.escapeHtml(shopPhone)}` : ''}</div>
-      </div>
-    </section>
-  </main>
+<div class="bill-container">
+  <div class="hdr">
+    <div class="hdr-name">${Utils.escapeHtml(shopName)}</div>
+    <div class="hdr-desc">${Utils.escapeHtml(shopDesc)}</div>
+  </div>
+
+  <div class="meta-row">
+    <div class="meta-customer">
+      Customer <span class="dotted-line">${Utils.escapeHtml(customerName)}</span>
+    </div>
+    <div class="meta-date">
+      Date <span class="dotted-line">${dateText}</span>
+    </div>
+  </div>
+
+  <table class="inv-table">
+    <thead>
+      <tr>
+        <th class="c-no">No</th>
+        <th class="c-desc">Description</th>
+        <th class="c-qty">Qty</th>
+        <th class="c-rate">Rate</th>
+        <th class="c-rs">Rs</th>
+        <th class="c-cts">Cts</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRowsHtml}
+      ${emptyRowsHtml}
+      <tr class="tfoot-row">
+        <td colspan="2" rowspan="3" class="invoice-no-val" style="vertical-align:top; padding-top:15px;">${Utils.escapeHtml(sale.invoiceNo || 'N/A')}</td>
+        <td rowspan="3" class="extra-info-cell" style="vertical-align:top; padding-top:15px;">${Utils.escapeHtml(extraInfoHtml)}</td>
+        <td class="total-label">Total</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(total)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Paid</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.amountPaid || 0)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Due</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.dueAmount || 0)}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>`;
+  },
+
+  async generateA5(sale, saleItems) {
+    const settings = await DB.getAllSettings();
+    let shopName = settings.shopName || 'SLS';
+    let shopDesc = (settings.shopAddress || '').replace(/\n/g, ' ');
+    if (shopName === 'Supiri Karawala') {
+      shopName = 'SLS';
+    }
+    if (!shopDesc || shopDesc === 'Daulagala Handassa') {
+      shopDesc = 'General merchants & wholesale and retail dealers in rice, oil, dried fish, prawns, bomba duck, golden anchovy and all kinds of fish products.';
+    }
+
+    const customer = sale.customerId ? await DB.getCustomer(sale.customerId) : null;
+    const customerName = customer?.name || 'Walk-In Customer';
+    const dateText = sale.createdAt
+      ? new Date(sale.createdAt).toLocaleDateString('en-GB')
+      : new Date().toLocaleDateString('en-GB');
+
+    const receiptItems = await this.getReceiptItems(sale, saleItems);
+
+    const MIN_ROWS = 12;
+    const itemRowsHtml = receiptItems.map((item, idx) => {
+      const qty = item.quantity || 0;
+      const price = item.price || 0;
+      const total = item.total ?? (qty * price - (item.discount || 0));
+      const rs = Math.floor(total);
+      const cts = Math.round((total - rs) * 100);
+      const gpp = item.gramsPerPacket || 0;
+      const qtyLabel = gpp > 0 ? `${qty}p` : qty;
+      const nameLabel = gpp > 0 ? `${Utils.escapeHtml(item.name || 'Item')} (${gpp}g)` : Utils.escapeHtml(item.name || 'Item');
+      return `<tr>
+        <td class="c-no">${idx + 1}</td>
+        <td class="c-desc">${nameLabel}</td>
+        <td class="c-qty">${qtyLabel}</td>
+        <td class="c-rate">${Utils.currencyPlain(price)}</td>
+        <td class="c-rs">${rs.toLocaleString('en-US')}</td>
+        <td class="c-cts">${cts.toString().padStart(2, '0')}</td>
+      </tr>`;
+    }).join('');
+
+    const emptyCount = Math.max(0, MIN_ROWS - receiptItems.length);
+    const emptyRowsHtml = Array.from({ length: emptyCount }, () =>
+      `<tr><td class="c-no">&nbsp;</td><td class="c-desc"></td><td class="c-qty"></td><td class="c-rate"></td><td class="c-rs"></td><td class="c-cts"></td></tr>`
+    ).join('');
+
+    const discount = sale.discount || 0;
+    const total = sale.total || 0;
+    const payMethod = this.paymentLabel(sale.paymentMethod);
+
+    const extraInfoHtml = [
+      discount > 0 ? `Discount: -${Utils.currencyPlain(discount)}` : '',
+      (sale.tax || 0) > 0 ? `Tax: ${Utils.currencyPlain(sale.tax)}` : '',
+      `Payment: ${payMethod}`
+    ].filter(Boolean).join(' | ');
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${Utils.escapeHtml(shopName)} - Invoice</title>
+<style>
+  @page { size: portrait; margin: 10mm 12mm 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; background: #fff; line-height: 1.25; padding: 0; }
+
+  .bill-container { width: 100%; max-width: 100%; display: flex; flex-direction: column; }
+
+  .hdr { text-align: center; margin-bottom: 12px; }
+  .hdr-name { font-size: 34px; font-weight: 900; font-family: 'Arial Black', Arial, sans-serif; color: #1b52c0; letter-spacing: 0.1em; line-height: 1.1; text-transform: uppercase; margin-bottom: 2px; }
+  .hdr-desc { font-size: 9px; color: #1b52c0; font-weight: normal; max-width: 95%; margin: 0 auto; line-height: 1.35; text-align: center; }
+
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: #1b52c0;
+    font-weight: bold;
+  }
+  .meta-customer { display: flex; flex: 1; align-items: flex-end; }
+  .meta-date { display: flex; width: 160px; align-items: flex-end; margin-left: 15px; }
+  .dotted-line {
+    border-bottom: 1.5px dotted #1b52c0;
+    flex: 1;
+    margin-left: 6px;
+    padding-bottom: 1px;
+    color: #000;
+    font-weight: normal;
+    font-size: 12px;
+    min-height: 16px;
+    text-align: left;
+  }
+
+  table.inv-table { width: 100%; border-collapse: collapse; margin-top: 3px; }
+  table.inv-table th, table.inv-table td {
+    border: 1px solid #1b52c0;
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+  table.inv-table th {
+    background-color: #1b52c0;
+    color: #fff;
+    font-weight: bold;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  table.inv-table td {
+    height: 26px;
+    vertical-align: middle;
+    color: #000;
+  }
+  table.inv-table .c-no   { width: 6%; text-align: center; }
+  table.inv-table .c-desc { width: 54%; text-align: left; }
+  table.inv-table .c-qty  { width: 10%; text-align: center; }
+  table.inv-table .c-rate { width: 12%; text-align: right; }
+  table.inv-table .c-rs   { width: 13%; text-align: right; }
+  table.inv-table .c-cts  { width: 5%; text-align: center; }
+
+  table.inv-table tr.tfoot-row td {
+    border: none;
+    height: 30px;
+    vertical-align: middle;
+    padding-top: 4px;
+  }
+  table.inv-table tr.tfoot-row td.invoice-no-val {
+    color: #cc0000;
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: bold;
+    font-size: 16px;
+    text-align: left;
+    padding-left: 5px;
+    letter-spacing: 0.5px;
+  }
+  table.inv-table tr.tfoot-row td.extra-info-cell {
+    text-align: right;
+    font-size: 9.5px;
+    color: #555;
+    padding-right: 10px;
+    font-weight: normal;
+  }
+  table.inv-table tr.tfoot-row td.total-label {
+    text-align: right;
+    font-weight: bold;
+    font-size: 13px;
+    color: #1b52c0;
+    padding-right: 10px;
+  }
+  table.inv-table tr.tfoot-row td.total-box-cell {
+    border: 1.5px solid #1b52c0;
+    background-color: #fff;
+    text-align: right;
+    padding-right: 8px;
+    font-weight: bold;
+    font-size: 13px;
+    color: #000;
+  }
+
+  @media print {
+    body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="bill-container">
+  <div class="hdr">
+    <div class="hdr-name">${Utils.escapeHtml(shopName)}</div>
+    <div class="hdr-desc">${Utils.escapeHtml(shopDesc)}</div>
+  </div>
+
+  <div class="meta-row">
+    <div class="meta-customer">
+      Customer <span class="dotted-line">${Utils.escapeHtml(customerName)}</span>
+    </div>
+    <div class="meta-date">
+      Date <span class="dotted-line">${dateText}</span>
+    </div>
+  </div>
+
+  <table class="inv-table">
+    <thead>
+      <tr>
+        <th class="c-no">No</th>
+        <th class="c-desc">Description</th>
+        <th class="c-qty">Qty</th>
+        <th class="c-rate">Rate</th>
+        <th class="c-rs">Rs</th>
+        <th class="c-cts">Cts</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${itemRowsHtml}
+      ${emptyRowsHtml}
+      <tr class="tfoot-row">
+        <td colspan="2" rowspan="3" class="invoice-no-val" style="vertical-align:top; padding-top:10px;">${Utils.escapeHtml(sale.invoiceNo || 'N/A')}</td>
+        <td rowspan="3" class="extra-info-cell" style="vertical-align:top; padding-top:10px;">${Utils.escapeHtml(extraInfoHtml)}</td>
+        <td class="total-label">Total</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(total)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Paid</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.amountPaid || 0)}</td>
+      </tr>
+      <tr class="tfoot-row">
+        <td class="total-label">Due</td>
+        <td colspan="2" class="total-box-cell">${Utils.currencyPlain(sale.dueAmount || 0)}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
 </body>
 </html>`;
   },
@@ -409,9 +732,21 @@ const Receipt = {
     }, 350);
   },
 
+  async printA5(sale, saleItems) {
+    const receiptHtml = await this.generateA5(sale, saleItems);
+    const printWindow = window.open('', '_blank', 'width=700,height=800');
+    printWindow.document.write(receiptHtml);
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 350);
+  },
+
   async printWithFormatChooser(sale, saleItems) {
     await this.chooseFormat((format) => {
       if (format === 'a4') this.printA4(sale, saleItems);
+      else if (format === 'a5') this.printA5(sale, saleItems);
       else this.print(sale, saleItems);
     });
   },
@@ -419,6 +754,7 @@ const Receipt = {
   async previewWithFormatChooser(sale, saleItems) {
     await this.chooseFormat((format) => {
       if (format === 'a4') this.printA4(sale, saleItems);
+      else if (format === 'a5') this.printA5(sale, saleItems);
       else this.preview(sale, saleItems);
     });
   },

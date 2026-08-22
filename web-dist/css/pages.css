@@ -5,7 +5,7 @@
   display: grid;
   grid-template-columns: 1fr var(--order-panel-width);
   gap: 0;
-  height: calc(100vh - var(--header-height));
+  height: calc(100dvh - var(--header-height));
   overflow: hidden;
 }
 
@@ -22,9 +22,27 @@
   gap: var(--space-3);
 }
 
+.billing-search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.billing-search-field:first-child { flex: 1; }
+.billing-search-field:last-child { width: 300px; flex-shrink: 0; }
+
+.billing-search-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-left: 2px;
+}
+
 .billing-barcode-input {
   position: relative;
-  flex: 1;
 }
 
 .billing-barcode-input input {
@@ -55,7 +73,6 @@
 
 .billing-search-input {
   position: relative;
-  width: 300px;
 }
 
 .billing-search-input input {
@@ -88,7 +105,7 @@
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--header-height));
+  height: 100%;
   overflow: hidden;
 }
 
@@ -118,16 +135,26 @@
 .order-panel-info strong { color: var(--text-primary); }
 
 .order-items {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 80px;
   overflow-y: auto;
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-2) var(--space-4);
+}
+
+/* Scrollable wrapper for summary + payment. Capped so that when payment-method
+   fields expand (e.g. Credit/Cheque), this section scrolls internally instead of
+   pushing the Place Order button (.order-actions) out of the visible panel. */
+.order-bottom {
+  flex: 0 1 auto;
+  overflow-y: auto;
+  max-height: 45vh;
 }
 
 .order-item {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--border-light);
   animation: fadeInUp 0.2s ease;
 }
@@ -234,7 +261,7 @@
 
 /* Order Summary */
 .order-summary {
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-2) var(--space-4);
   border-top: 1px solid var(--border);
   background: var(--bg-input);
 }
@@ -243,16 +270,16 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--space-1) 0;
+  padding: 2px 0;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
 }
 
 .order-summary-row.total {
-  padding-top: var(--space-3);
-  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  margin-top: var(--space-1);
   border-top: 2px solid var(--border);
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
   color: var(--text-dark);
 }
@@ -269,51 +296,62 @@
 
 /* Order Payment */
 .order-payment {
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-2) var(--space-4);
   border-top: 1px solid var(--border);
 }
 
 .order-payment-label {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .order-amount-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .order-amount-row .form-group label {
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
-  margin-bottom: var(--space-1);
+  margin-bottom: 2px;
 }
 
 .order-amount-row input {
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-md);
+  padding: 4px var(--space-2);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-bold);
+  height: 32px;
 }
 
-/* Order Actions */
+/* Order Actions — always pinned at the bottom of the panel */
 .order-actions {
-  padding: var(--space-4) var(--space-5);
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
   display: flex;
-  gap: var(--space-3);
+  gap: var(--space-2);
   border-top: 1px solid var(--border);
 }
 
-.order-actions .btn { flex: 1; padding: var(--space-3); font-size: var(--font-size-base); }
+.order-actions .btn {
+  flex: 1;
+  padding: var(--space-2);
+  font-size: var(--font-size-sm);
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* ===== DASHBOARD ===== */
 .dashboard-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-5);
+  align-items: start;
 }
 
 .dashboard-chart-card {
@@ -337,6 +375,16 @@
 
 .dashboard-recent {
   grid-column: span 2;
+}
+
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-recent {
+    grid-column: span 1;
+  }
 }
 
 /* Low stock cards */
@@ -580,7 +628,7 @@
     display: block;
     position: relative;
     width: 100%;
-    height: calc(100vh - var(--header-height));
+    height: calc(100dvh - var(--header-height));
     overflow: hidden;
   }
 
@@ -589,6 +637,17 @@
     height: 100%;
     padding: var(--space-3);
     overflow-y: auto;
+  }
+
+  /* Stack the barcode and search fields instead of squeezing them side by side */
+  .billing-search-row {
+    flex-direction: column;
+  }
+
+  .billing-search-field:first-child,
+  .billing-search-field:last-child {
+    width: 100%;
+    flex: none;
   }
 
   /* Slide-over order panel drawer */

@@ -11,6 +11,7 @@ const ReportsPage = {
           <option value="daily">Daily Sales</option>
           <option value="monthly">Monthly Sales</option>
           <option value="bestSelling">Best Selling Items</option>
+          <option value="itemWise">Item Wise Sales (Daily)</option>
           <option value="lowStock">Low Stock Report</option>
           <option value="stock">Stock Report</option>
           <option value="profit">Profit Report</option>
@@ -38,6 +39,7 @@ const ReportsPage = {
       case 'daily': await this.dailySalesReport(date, output); break;
       case 'monthly': await this.monthlySalesReport(date, output); break;
       case 'bestSelling': await this.bestSellingReport(output); break;
+      case 'itemWise': await this.itemWiseReport(date, output); break;
       case 'lowStock': await this.lowStockReport(output); break;
       case 'stock': await this.stockReport(output); break;
       case 'profit': await this.profitReport(date, output); break;
@@ -99,7 +101,7 @@ const ReportsPage = {
       const data = Object.keys(dailyMap).sort().map(d => dailyMap[d].total);
       new Chart(document.getElementById('monthlyChart'), {
         type: 'line', data: { labels, datasets: [{ label: 'Revenue', data, borderColor: '#4318FF', backgroundColor: 'rgba(67,24,255,0.1)', fill: true, tension: 0.4, borderWidth: 2 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } }, x: { grid: { display: false } } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, suggestedMax: 1000, grid: { color: 'rgba(0,0,0,0.04)' } }, x: { grid: { display: false } } } }
       });
     } catch(e) {}
     this._reportData = sales;
@@ -135,7 +137,7 @@ const ReportsPage = {
     const itemMap = {};
     allItems.forEach(item => {
       const k = item.productId || item.name;
-      if (!itemMap[k]) itemMap[k] = { name: item.name, qty: 0, revenue: 0 };
+      if (!itemMap[k]) itemMap[k] = { name: item.name, qty: 0, revenue: 0, gramsPerPacket: item.gramsPerPacket || 0 };
       itemMap[k].qty += item.quantity || 0;
       itemMap[k].revenue += item.netRevenue || 0;
     });
@@ -144,8 +146,64 @@ const ReportsPage = {
       <div class="content-card-header"><h3>Best Selling Items</h3></div>
       <div class="content-card-body">
         <table class="data-table"><thead><tr><th>#</th><th>Product</th><th>Qty Sold</th><th>Net Revenue</th></tr></thead>
-        <tbody>${sorted.map((item, i) => `<tr><td>${i + 1}</td><td><strong>${item.name}</strong></td>
-          <td><span class="badge badge-info">${item.qty}</span></td><td>${Utils.currency(item.revenue)}</td></tr>`).join('')}</tbody></table>
+        <tbody>${sorted.map((item, i) => {
+          const qtyLabel = item.gramsPerPacket > 0 ? `${item.qty} pkts` : item.qty;
+          return `<tr><td>${i + 1}</td><td><strong>${item.name}</strong></td>
+          <td><span class="badge badge-info">${qtyLabel}</span></td><td>${Utils.currency(item.revenue)}</td></tr>`;
+        }).join('')}</tbody></table>
+      </div>`;
+    this._reportData = sorted;
+  },
+
+  async itemWiseReport(date, output) {
+    const sales = await DB.getDailySales(date);
+    const allItems = [];
+    for (const sale of sales) {
+      const items = await DB.getSaleItems(sale.id);
+      const returnedQtyByItem = {};
+      const returns = (await DB.getReturns()).filter(r => r.saleId === sale.id);
+      for (const ret of returns) {
+        const returnItems = await DB.getReturnItems(ret.id);
+        for (const item of returnItems) {
+          const key = item.variationId ? `v:${item.variationId}` : `p:${item.productId}`;
+          returnedQtyByItem[key] = (returnedQtyByItem[key] || 0) + (item.quantity || 0);
+        }
+      }
+      const adjustedItems = items.map(item => {
+        const key = item.variationId ? `v:${item.variationId}` : `p:${item.productId}`;
+        const quantity = Math.max(0, (item.quantity || 0) - (returnedQtyByItem[key] || 0));
+        return { ...item, quantity };
+      }).filter(item => item.quantity > 0);
+      const grossItemTotal = adjustedItems.reduce((s, item) => s + ((item.quantity || 0) * (item.price || 0)), 0);
+      const saleNetRevenue = Math.max(0, (sale.total || 0) - (sale.tax || 0));
+      allItems.push(...adjustedItems.map(item => {
+        const grossRevenue = (item.quantity || 0) * (item.price || 0);
+        const netRevenue = grossItemTotal > 0 ? (grossRevenue / grossItemTotal) * saleNetRevenue : 0;
+        return { ...item, grossRevenue, netRevenue };
+      }));
+    }
+    const itemMap = {};
+    allItems.forEach(item => {
+      const k = item.productId || item.name;
+      if (!itemMap[k]) itemMap[k] = { name: item.name, qty: 0, revenue: 0, gramsPerPacket: item.gramsPerPacket || 0 };
+      itemMap[k].qty += item.quantity || 0;
+      itemMap[k].revenue += item.netRevenue || 0;
+    });
+    const sorted = Object.values(itemMap).sort((a, b) => b.qty - a.qty);
+    const totalRev = sorted.reduce((s, item) => s + item.revenue, 0);
+    output.innerHTML = `
+      <div class="content-card-header"><h3>Item Wise Sales — ${Utils.formatDate(date)}</h3></div>
+      <div class="content-card-body">
+        <div class="stats-row" style="margin-bottom:20px">
+          <div class="stat-card"><div class="stat-card-icon blue">${Utils.icons.billing}</div>
+            <div class="stat-card-info"><span class="stat-card-label">Total Item Revenue</span><span class="stat-card-value">${Utils.currency(totalRev)}</span></div></div>
+        </div>
+        <table class="data-table"><thead><tr><th>#</th><th>Product</th><th>Qty Sold</th><th>Net Revenue</th></tr></thead>
+        <tbody>${sorted.length === 0 ? '<tr><td colspan="4" style="text-align:center;padding:20px">No items sold on this date</td></tr>' : sorted.map((item, i) => {
+          const qtyLabel = item.gramsPerPacket > 0 ? `${item.qty} pkts` : item.qty;
+          return `<tr><td>${i + 1}</td><td><strong>${item.name}</strong></td>
+          <td><span class="badge badge-info">${qtyLabel}</span></td><td>${Utils.currency(item.revenue)}</td></tr>`;
+        }).join('')}</tbody></table>
       </div>`;
     this._reportData = sorted;
   },
@@ -156,22 +214,36 @@ const ReportsPage = {
       <div class="content-card-header"><h3>Low Stock Report (${lowStock.length} items)</h3></div>
       <div class="content-card-body">
         <table class="data-table"><thead><tr><th>Product</th><th>Current Stock</th><th>Reorder Level</th><th>Status</th></tr></thead>
-        <tbody>${lowStock.map(p => `<tr><td><strong>${p.name}</strong></td>
-          <td><span class="badge badge-danger">${p.stock}</span></td><td>${p.reorderLevel}</td>
-          <td>${p.stock <= 0 ? '<span class="badge badge-danger">Out of Stock</span>' : '<span class="badge badge-warning">Low</span>'}</td></tr>`).join('')}</tbody></table>
+        <tbody>${lowStock.map(p => {
+          const gpp = p.packetSizeGrams || 0;
+          const stockDisplay = gpp > 0 ? `${((p.stock || 0) / 1000).toFixed(2)} kg (${Math.floor((p.stock || 0) / gpp)} pkts)` : (p.stock || 0);
+          const effective = gpp > 0 ? Math.floor((p.stock || 0) / gpp) : (p.stock || 0);
+          return `<tr><td><strong>${p.name}</strong></td>
+          <td><span class="badge badge-danger">${stockDisplay}</span></td><td>${p.reorderLevel || 5}</td>
+          <td>${effective <= 0 ? '<span class="badge badge-danger">Out of Stock</span>' : '<span class="badge badge-warning">Low</span>'}</td></tr>`;
+        }).join('')}</tbody></table>
       </div>`;
     this._reportData = lowStock;
   },
 
   async stockReport(output) {
     const products = await DB.getProducts();
-    const totalVal = products.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
+    const productValue = p => {
+      const gpp = p.packetSizeGrams || 0;
+      const packets = gpp > 0 ? (p.stock || 0) / gpp : (p.stock || 0);
+      return packets * (p.costPrice || 0);
+    };
+    const totalVal = products.reduce((s, p) => s + productValue(p), 0);
     output.innerHTML = `
       <div class="content-card-header"><h3>Stock Report — Value: ${Utils.currency(totalVal)}</h3></div>
       <div class="content-card-body">
         <table class="data-table"><thead><tr><th>Product</th><th>Barcode</th><th>Stock</th><th>Cost</th><th>Value</th></tr></thead>
-        <tbody>${products.map(p => `<tr><td><strong>${p.name}</strong></td><td>${p.barcode || '—'}</td>
-          <td>${p.stock}</td><td>${Utils.currency(p.costPrice)}</td><td>${Utils.currency((p.stock||0)*(p.costPrice||0))}</td></tr>`).join('')}</tbody></table>
+        <tbody>${products.map(p => {
+          const gpp = p.packetSizeGrams || 0;
+          const stockDisplay = gpp > 0 ? `${((p.stock || 0) / 1000).toFixed(2)} kg` : (p.stock || 0);
+          return `<tr><td><strong>${p.name}</strong></td><td>${p.barcode || '—'}</td>
+          <td>${stockDisplay}</td><td>${Utils.currency(p.costPrice)}</td><td>${Utils.currency(productValue(p))}</td></tr>`;
+        }).join('')}</tbody></table>
       </div>`;
     this._reportData = products;
   },

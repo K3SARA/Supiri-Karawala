@@ -8,7 +8,7 @@ const publicDir = path.join(__dirname, 'web-dist');
 const port = Number(process.env.PORT || 3000);
 const databaseUrl = process.env.DATABASE_URL;
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
-const TABLES = ['products','categories','variations','customers','suppliers','sales','saleItems','purchases','purchaseItems','returns','returnItems','stockAdjustments','expenses','payments','users','settings'];
+const TABLES = ['products','categories','variations','customers','suppliers','sales','saleItems','purchases','purchaseItems','returns','returnItems','stockAdjustments','expenses','payments','users','settings','cheques'];
 
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -176,12 +176,16 @@ function addSale(data, saleInput) {
 
     if (item.variationId) {
       const variation = byId(data.variations, item.variationId);
-      if (!variation || (variation.stock || 0) < item.quantity) throw new Error(`Insufficient stock for variation ${item.variationId}`);
-      variation.stock = (variation.stock || 0) - item.quantity;
+      const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+      const vDeduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
+      if (!variation || (variation.stock || 0) < vDeduction) throw new Error(`Insufficient stock for variation ${item.variationId}`);
+      variation.stock = (variation.stock || 0) - vDeduction;
     } else {
       const product = byId(data.products, item.productId);
-      if (!product || (product.stock || 0) < item.quantity) throw new Error(`Insufficient stock for product ${item.productId}`);
-      product.stock = (product.stock || 0) - item.quantity;
+      const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+      const deduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
+      if (!product || (product.stock || 0) < deduction) throw new Error(`Insufficient stock for ${product?.name || 'product'}`);
+      product.stock = (product.stock || 0) - deduction;
     }
   }
 
@@ -207,12 +211,14 @@ function updateSale(data, saleId, updatedSaleInput) {
 
   const oldItems = data.saleItems.filter(item => Number(item.saleId) === Number(saleId));
   for (const item of oldItems) {
+    const netQty = Math.max(0, (item.quantity || 0) - (item.boxWeight || 0));
+    const restoreAmt = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
     if (item.variationId) {
       const variation = byId(data.variations, item.variationId);
-      if (variation) variation.stock = (variation.stock || 0) + (item.quantity || 0);
+      if (variation) variation.stock = (variation.stock || 0) + restoreAmt;
     } else {
       const product = byId(data.products, item.productId);
-      if (product) product.stock = (product.stock || 0) + (item.quantity || 0);
+      if (product) product.stock = (product.stock || 0) + restoreAmt;
     }
   }
 
@@ -233,12 +239,16 @@ function updateSale(data, saleId, updatedSaleInput) {
     addRow(data, 'saleItems', item);
     if (item.variationId) {
       const variation = byId(data.variations, item.variationId);
-      if (!variation || (variation.stock || 0) < item.quantity) throw new Error(`Insufficient stock for variation ${item.variationId}`);
-      variation.stock = (variation.stock || 0) - item.quantity;
+      const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+      const vDeduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
+      if (!variation || (variation.stock || 0) < vDeduction) throw new Error(`Insufficient stock for variation ${item.variationId}`);
+      variation.stock = (variation.stock || 0) - vDeduction;
     } else {
+      const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+      const deduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
       const product = byId(data.products, item.productId);
-      if (!product || (product.stock || 0) < item.quantity) throw new Error(`Insufficient stock for product ${item.productId}`);
-      product.stock = (product.stock || 0) - item.quantity;
+      if (!product || (product.stock || 0) < deduction) throw new Error(`Insufficient stock for ${product?.name || 'product'}`);
+      product.stock = (product.stock || 0) - deduction;
     }
   }
 
@@ -274,14 +284,16 @@ function voidSale(data, saleId) {
 
   for (const item of data.saleItems.filter(i => Number(i.saleId) === Number(saleId))) {
     const key = item.variationId ? `v:${item.variationId}` : `p:${item.productId}`;
-    const restoreQty = Math.max(0, (item.quantity || 0) - (returnedQtyByItem[key] || 0));
+    const netQty = Math.max(0, (item.quantity || 0) - (item.boxWeight || 0));
+    const restoreQty = Math.max(0, netQty - (returnedQtyByItem[key] || 0));
     if (restoreQty <= 0) continue;
+    const restoreAmt = (item.gramsPerPacket > 0) ? restoreQty * item.gramsPerPacket : restoreQty;
     if (item.variationId) {
       const variation = byId(data.variations, item.variationId);
-      if (variation) variation.stock = (variation.stock || 0) + restoreQty;
+      if (variation) variation.stock = (variation.stock || 0) + restoreAmt;
     } else {
       const product = byId(data.products, item.productId);
-      if (product) product.stock = (product.stock || 0) + restoreQty;
+      if (product) product.stock = (product.stock || 0) + restoreAmt;
     }
   }
 
@@ -312,8 +324,25 @@ function addPurchase(data, purchaseInput) {
     const currentCost = product.costPrice || 0;
     const incomingCost = item.buyingPrice || currentCost;
     const newStock = currentStock + incomingQty;
+    const gpp = product.packetSizeGrams || 0;
+    
+    let actualIncomingCostPerPacket = incomingCost;
+    if (gpp > 0) actualIncomingCostPerPacket = incomingCost * (gpp / 1000);
+    
+    let weightedCost = actualIncomingCostPerPacket;
+    if (newStock > 0) {
+      if (gpp > 0) {
+         const currentPackets = currentStock / gpp;
+         const incomingPackets = incomingQty / gpp;
+         const newPackets = newStock / gpp;
+         weightedCost = ((currentPackets * currentCost) + (incomingPackets * actualIncomingCostPerPacket)) / newPackets;
+      } else {
+         weightedCost = ((currentStock * currentCost) + (incomingQty * actualIncomingCostPerPacket)) / newStock;
+      }
+    }
+    
     product.stock = newStock;
-    product.costPrice = newStock > 0 ? ((currentStock * currentCost) + (incomingQty * incomingCost)) / newStock : incomingCost;
+    product.costPrice = weightedCost;
   }
   return purchaseId;
 }
@@ -361,7 +390,10 @@ function addReturn(data, retInput) {
       if (variation) variation.stock = (variation.stock || 0) + item.quantity;
     } else {
       const product = byId(data.products, item.productId);
-      if (product) product.stock = (product.stock || 0) + item.quantity;
+      if (product) {
+         const addBack = (product.packetSizeGrams || 0) > 0 ? item.quantity * product.packetSizeGrams : item.quantity;
+         product.stock = (product.stock || 0) + addBack;
+      }
     }
   }
   if (sale && ret.totalRefund > 0) {
@@ -407,17 +439,16 @@ function addStockAdjustment(data, adjInput) {
   const product = byId(data.products, adj.productId);
   if (product) {
     const currentStock = product.stock || 0;
-    const costPrice = adj.type === 'in' ? (adj.costPrice || adj.buyingPrice || product.costPrice || 0) : (product.costPrice || 0);
+    const costPrice = adj.type === 'in'
+      ? (adj.costPrice || adj.buyingPrice || product.costPrice || 0)
+      : (product.costPrice || 0);
     const quantity = adj.quantity || 0;
     const lossQty = adj.type === 'in' ? 0 : Math.min(quantity, currentStock);
+    
+    const gpp = product.packetSizeGrams || 0;
+    const lossPackets = gpp > 0 ? (lossQty / gpp) : lossQty;
+    
     adj.costPrice = costPrice;
-    adj.lossAmount = lossQty * costPrice;
-  }
-  const id = addRow(data, 'stockAdjustments', adj);
-  if (product) {
-    let newStock = product.stock || 0;
-    if (adj.type === 'in') newStock += adj.quantity;
-    else newStock -= adj.quantity;
     if (newStock < 0) newStock = 0;
     if (adj.type === 'in') {
       const currentStock = product.stock || 0;
@@ -468,6 +499,60 @@ function addPayment(data, paymentInput) {
     }
   }
   return addRow(data, 'payments', payment);
+}
+
+function addCheque(data, chequeInput) {
+  const now = new Date().toISOString();
+  return addRow(data, 'cheques', { ...chequeInput, status: chequeInput.status || 'pending', createdAt: now, updatedAt: now });
+}
+
+function updateCheque(data, id, updates) {
+  return updateRow(data, 'cheques', id, { ...updates, updatedAt: new Date().toISOString() });
+}
+
+function updateChequeStatus(data, id, newStatus) {
+  const cheque = byId(data.cheques, id);
+  if (!cheque) throw new Error('Cheque not found');
+  if (cheque.status === 'cleared' || cheque.status === 'cancelled') {
+    throw new Error(`Cannot change status from ${cheque.status}`);
+  }
+  if (cheque.status === 'bounced' && newStatus !== 'pending') {
+    throw new Error('A bounced cheque can only be re-presented (set back to Pending)');
+  }
+
+  const now = new Date().toISOString();
+  const update = { status: newStatus, updatedAt: now };
+  if (newStatus === 'deposited') update.depositedDate = now;
+  if (newStatus === 'cleared')   update.clearedDate   = now;
+  if (newStatus === 'bounced')   update.bouncedDate   = now;
+  Object.assign(cheque, update);
+
+  if (newStatus === 'bounced') {
+    if (cheque.customerId) {
+      const customer = byId(data.customers, cheque.customerId);
+      if (customer) customer.balance = (customer.balance || 0) + (cheque.amount || 0);
+    }
+    if (cheque.saleId) {
+      const sale = byId(data.sales, cheque.saleId);
+      if (sale) sale.status = 'bounced';
+    }
+  }
+
+  return null;
+}
+
+function deleteCheque(data, id) {
+  const cheque = byId(data.cheques, id);
+  if (!cheque) return null;
+  if (cheque.status === 'cleared') throw new Error('Cannot delete a cleared cheque');
+  removeById(data.cheques, id);
+  return null;
+}
+
+function addPaymentWithCheque(data, paymentInput, chequeInput) {
+  const paymentId = addPayment(data, paymentInput);
+  const chequeId = addCheque(data, { ...chequeInput, paymentId });
+  return { paymentId, chequeId };
 }
 
 function ensureDefaultUserAccounts(data) {
@@ -532,6 +617,11 @@ function mutateData(data, method, args) {
       return null;
     }
     case 'addPayment': return addPayment(data, args[0]);
+    case 'addCheque': return addCheque(data, args[0]);
+    case 'updateCheque': return updateCheque(data, args[0], args[1]);
+    case 'updateChequeStatus': return updateChequeStatus(data, args[0], args[1]);
+    case 'deleteCheque': return deleteCheque(data, args[0]);
+    case 'addPaymentWithCheque': return addPaymentWithCheque(data, args[0], args[1]);
     case 'addUser': return addRow(data, 'users', prepareUser(args[0]));
     case 'updateUser': return updateRow(data, 'users', args[0], prepareUser(args[1]));
     case 'deleteUser': removeById(data.users, args[0]); return null;
@@ -564,7 +654,7 @@ async function mutateCloudState(method, args) {
     const nextRevision = Number(result.rows[0].revision || 0) + 1;
     await client.query('UPDATE app_state SET data = $2::jsonb, revision = $3, updated_at = NOW() WHERE id = $1', ['primary', JSON.stringify(data), nextRevision]);
     await client.query('COMMIT');
-    return { result: mutationResult, data, revision: nextRevision };
+    return { result: mutationResult, revision: nextRevision };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -607,15 +697,24 @@ async function handleApi(req, res) {
   if (!req.url.startsWith('/api/db/snapshot')) return false;
 
   if (req.method === 'GET') {
+    const parsedUrl = new URL(req.url, `http://localhost:${port}`);
+    const clientRevision = Number(parsedUrl.searchParams.get('revision') || 0);
     const result = await pool.query('SELECT data, revision FROM app_state WHERE id = $1', ['primary']);
     if (result.rowCount === 0) {
       sendJson(res, 200, { initialized: false, revision: 0, data: null });
       return true;
     }
 
+    const serverRevision = result.rows[0].revision;
+    if (serverRevision <= clientRevision) {
+      sendJson(res, 200, { initialized: true, revision: serverRevision, hasUpdates: false });
+      return true;
+    }
+
     sendJson(res, 200, {
       initialized: true,
-      revision: result.rows[0].revision,
+      revision: serverRevision,
+      hasUpdates: true,
       data: result.rows[0].data
     });
     return true;

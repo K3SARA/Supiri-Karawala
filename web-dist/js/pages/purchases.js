@@ -67,7 +67,7 @@ const PurchasesPage = {
             <select class="form-select po-product" data-idx="${i}"><option value="">Select...</option>
               ${products.map(p => `<option value="${p.id}" ${item.productId == p.id ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div>
           <div class="form-group"><label class="form-label" style="font-size:11px">Qty</label>
-            <input type="number" class="form-input po-qty" data-idx="${i}" value="${item.quantity}" min="1"></div>
+            <input type="number" class="form-input po-qty" data-idx="${i}" value="${item.quantity}" min="0.001" step="any"></div>
           <div class="form-group" style="display:flex;gap:8px;align-items:end">
             <div style="flex:1"><label class="form-label" style="font-size:11px">Price (LKR)</label>
               <input type="number" class="form-input po-price" data-idx="${i}" value="${item.buyingPrice}" min="0" step="0.01"></div>
@@ -87,7 +87,7 @@ const PurchasesPage = {
         if (prod) items[idx].buyingPrice = prod.costPrice || 0;
         renderItems();
       }));
-      document.querySelectorAll('.po-qty').forEach(el => el.addEventListener('input', e => { items[parseInt(e.target.dataset.idx)].quantity = parseInt(e.target.value) || 0; renderItems(); }));
+      document.querySelectorAll('.po-qty').forEach(el => el.addEventListener('input', e => { items[parseInt(e.target.dataset.idx)].quantity = parseFloat(e.target.value) || 0; renderItems(); }));
       document.querySelectorAll('.po-price').forEach(el => el.addEventListener('input', e => { items[parseInt(e.target.dataset.idx)].buyingPrice = parseFloat(e.target.value) || 0; renderItems(); }));
       document.querySelectorAll('.po-remove').forEach(el => el.addEventListener('click', e => { items.splice(parseInt(e.target.closest('[data-idx]').dataset.idx), 1); renderItems(); }));
     };

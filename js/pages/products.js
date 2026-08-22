@@ -35,8 +35,12 @@ const ProductsPage = {
         { key: 'costPrice', label: 'Cost Price', render: r => Utils.currency(r.costPrice) },
         { key: 'sellingPrice', label: 'Sell Price', render: r => `<strong>${Utils.currency(r.sellingPrice)}</strong>` },
         { key: 'stock', label: 'Stock', render: r => {
-          const low = (r.stock || 0) <= (r.reorderLevel || 5);
-          return `<span class="badge ${low ? 'badge-danger' : 'badge-success'}">${r.stock || 0}</span>`;
+          const gpp = r.packetSizeGrams || 0;
+          const stockText = gpp > 0 ? `${((r.stock || 0) / 1000).toFixed(2)} kg` : (r.stock || 0);
+          const low = gpp > 0
+            ? ((r.stock || 0) / gpp) <= (r.reorderLevel || 5)
+            : (r.stock || 0) <= (r.reorderLevel || 5);
+          return `<span class="badge ${low ? 'badge-danger' : 'badge-success'}">${stockText}</span>`;
         }},
       ],
       data: products,
@@ -81,16 +85,32 @@ const ProductsPage = {
               <input type="number" class="form-input" id="pSellingPrice" value="${product?.sellingPrice || ''}" min="0" step="0.01" required></div>
           </div>
           <div class="form-row" style="margin-bottom:16px">
-            <div class="form-group"><label class="form-label">Stock Quantity</label>
-              <input type="number" class="form-input" id="pStock" value="${product?.stock ?? 0}" min="0"></div>
+            <div class="form-group">
+              <label class="form-label" id="pStockLabel">Stock Quantity</label>
+              <input type="number" class="form-input" id="pStock" value="${(product?.packetSizeGrams > 0 && product?.stock) ? (product.stock / 1000) : (product?.stock ?? 0)}" min="0" step="any">
+              <span id="pStockNote" style="font-size:11px;color:var(--primary);margin-top:3px;display:block;min-height:16px"></span>
+            </div>
             <div class="form-group"><label class="form-label">Reorder Level</label>
-              <input type="number" class="form-input" id="pReorder" value="${product?.reorderLevel ?? 5}" min="0"></div>
+              <input type="number" class="form-input" id="pReorder" value="${product?.reorderLevel ?? 5}" min="0" step="any"></div>
           </div>
-          <div class="form-row">
+          <div class="form-row" style="margin-bottom:16px">
+            <div class="form-group">
+              <label class="form-label">Packet Size <span style="background:var(--primary);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;vertical-align:middle;letter-spacing:0.5px">GRAMS</span></label>
+              <input type="number" class="form-input" id="pPacketSize" value="${product?.packetSizeGrams || ''}" min="0.001" step="any" placeholder="e.g. 100 for 100g packets">
+              <span style="font-size:11px;color:var(--text-secondary);margin-top:3px;display:block">Bulk items sold by weight. Leave empty for regular unit items.</span>
+            </div>
+            <div class="form-group"></div>
+          </div>
+          <div class="form-row" style="margin-bottom:16px">
             <div class="form-group"><label class="form-label">Manufacture Date</label>
               <input type="date" class="form-input" id="pMfgDate" value="${product?.mfgDate || ''}"></div>
             <div class="form-group"><label class="form-label">Expiry Date</label>
               <input type="date" class="form-input" id="pExpDate" value="${product?.expDate || ''}"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Batch No</label>
+              <input class="form-input" id="pBatchNo" placeholder="e.g. B001" value="${product?.batchNo || ''}"></div>
+            <div class="form-group"></div>
           </div>
         </form>
       `,
@@ -100,6 +120,29 @@ const ProductsPage = {
         <button class="btn btn-primary" id="saveProductBtn">${isEdit ? 'Update' : 'Add'} Product</button>
       `
     });
+
+    // Dynamic stock label based on packet size
+    const _pPacketSize = document.getElementById('pPacketSize');
+    const _pStock      = document.getElementById('pStock');
+    const _pStockLabel = document.getElementById('pStockLabel');
+    const _pStockNote  = document.getElementById('pStockNote');
+    const _updateStockLabel = () => {
+      const ps = parseFloat(_pPacketSize.value) || 0;
+      if (ps > 0) {
+        _pStockLabel.textContent = 'Stock Quantity (KG)';
+        _pStock.placeholder = 'e.g. 400 for 400kg';
+        const kg = parseFloat(_pStock.value) || 0;
+        const totalGrams = kg * 1000;
+        _pStockNote.textContent = totalGrams > 0 ? `Packets (How many packets): ${Math.floor(totalGrams / ps)}` : '';
+      } else {
+        _pStockLabel.textContent = 'Stock Quantity';
+        _pStock.placeholder = '';
+        _pStockNote.textContent = '';
+      }
+    };
+    _pPacketSize.addEventListener('input', _updateStockLabel);
+    _pStock.addEventListener('input', _updateStockLabel);
+    _updateStockLabel();
 
     document.getElementById('saveProductBtn').addEventListener('click', async () => {
       const data = await this.getProductFormData(product);
@@ -151,10 +194,14 @@ const ProductsPage = {
       brand: document.getElementById('pBrand').value.trim(),
       costPrice: parseFloat(document.getElementById('pCostPrice').value) || 0,
       sellingPrice: parseFloat(document.getElementById('pSellingPrice').value) || 0,
-      stock: parseInt(document.getElementById('pStock').value) || 0,
-      reorderLevel: parseInt(document.getElementById('pReorder').value) || 5,
+      stock: (parseFloat(document.getElementById('pPacketSize').value) || 0) > 0 
+                ? (parseFloat(document.getElementById('pStock').value) || 0) * 1000 
+                : (parseFloat(document.getElementById('pStock').value) || 0),
+      reorderLevel: parseFloat(document.getElementById('pReorder').value) || 5,
+      packetSizeGrams: parseFloat(document.getElementById('pPacketSize').value) || 0,
       mfgDate: document.getElementById('pMfgDate').value || null,
       expDate: document.getElementById('pExpDate').value || null,
+      batchNo: document.getElementById('pBatchNo').value.trim() || null,
       emoji: product?.emoji || Utils.categoryEmoji(category?.name)
     };
   },
@@ -185,109 +232,114 @@ const ProductsPage = {
   },
 
   labelHtml(product) {
-    const safeName = Utils.escapeHtml(product.name || 'Product');
-    const safeBarcode = Utils.escapeHtml(product.barcode || '');
+    const safeName  = Utils.escapeHtml(product.name || 'Product');
     const safePrice = Utils.currency(product.sellingPrice || 0);
-    const fmtDate = (d) => d ? d.split('-').reverse().join('/') : '';
-    const mfgDate = fmtDate(product.mfgDate);
-    const expDate = fmtDate(product.expDate);
-    const datesHtml = (mfgDate || expDate) ? `
-      <div class="barcode-label-dates">
-        ${mfgDate ? `<span>MFD: ${mfgDate}</span>` : ''}
-        ${expDate ? `<span>EXP: ${expDate}</span>` : ''}
-      </div>` : '';
+    const fmtDate   = (d) => d ? d.split('-').reverse().join('/') : '';
+    const mfgDate   = fmtDate(product.mfgDate);
+    const expDate   = fmtDate(product.expDate);
+    const batchNo   = Utils.escapeHtml(product.batchNo || '');
+    const weight    = Utils.escapeHtml(product.weight  || '');
+    const safeBarcode = Utils.escapeHtml(product.barcode || '');
     return `
       <div class="barcode-label">
-        <div class="barcode-label-name">${safeName}</div>
+        <div class="bl-top">
+          <div class="bl-left">
+            <div class="bl-date-row"><span class="bl-key">MFD</span><span class="bl-colon">:</span><span class="bl-dval">${mfgDate || '&mdash;'}</span></div>
+            <div class="bl-date-row"><span class="bl-key">EXP</span><span class="bl-colon">:</span><span class="bl-dval">${expDate || '&mdash;'}</span></div>
+          </div>
+          <div class="bl-right">
+            <div class="bl-mrp-key">MRP</div>
+            <div class="bl-mrp-val">${safePrice}</div>
+            <div class="bl-batch-key">Batch No</div>
+            <div class="bl-batch-val">${batchNo || '&mdash;'}</div>
+          </div>
+        </div>
+        <div class="bl-name">${safeName}</div>
+        ${weight ? `<div class="bl-weight">${weight}</div>` : ''}
         <svg class="barcode-svg"></svg>
-        <div class="barcode-label-code">${safeBarcode}</div>
-        <div class="barcode-label-price">${safePrice}</div>
-        ${datesHtml}
+        ${safeBarcode ? `<div class="bl-code">${safeBarcode}</div>` : ''}
       </div>
     `;
   },
 
-  printDocumentHtml(labelBody, labelW = 50, labelH = 30, columns = 1) {
-    const cols = Math.max(1, Math.min(4, columns));
+  printDocumentHtml(labelBody, labelW = 50, labelH = 30, columns = 1, qty = 1, style = {}) {
+    const cols   = Math.max(1, Math.min(4, columns));
     const totalW = labelW * cols;
-    const svgW = Math.max(20, labelW - 8);
-    const svgH = Math.max(7, Math.floor(labelH * 0.30));
-    const namePx = Math.max(7, Math.round(labelH * 0.28));
-    const codePx = Math.max(6, Math.round(labelH * 0.25));
-    const pricePx = Math.max(7, Math.round(labelH * 0.28));
-    const datePx = Math.max(5, Math.round(labelH * 0.22));
-    const repeatedBody = Array.from({ length: cols }, () => labelBody).join('');
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Barcode Label</title>
-        <style>
-          @page { size: ${totalW}mm ${labelH}mm; margin: 0; }
-          html, body {
-            width: ${totalW}mm;
-            height: ${labelH}mm;
-            margin: 0;
-            padding: 0;
-            background: #fff;
-            color: #000;
-            font-family: Arial, sans-serif;
-          }
-          body {
-            display: flex;
-            flex-direction: row;
-          }
-          .barcode-label {
-            box-sizing: border-box;
-            flex: 0 0 ${labelW}mm;
-            width: ${labelW}mm;
-            height: ${labelH}mm;
-            padding: 1.5mm 2.5mm;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
-            overflow: hidden;
-          }
-          .barcode-label-name {
-            width: 100%;
-            font-size: ${namePx}px;
-            font-weight: 700;
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.2;
-          }
-          .barcode-svg {
-            width: ${svgW}mm;
-            height: ${svgH}mm;
-            display: block;
-          }
-          .barcode-label-code {
-            font-size: ${codePx}px;
-            letter-spacing: 1px;
-            line-height: 1.2;
-          }
-          .barcode-label-price {
-            font-size: ${pricePx}px;
-            font-weight: 700;
-            line-height: 1.2;
-          }
-          .barcode-label-dates {
-            width: 100%;
-            display: flex;
-            justify-content: space-between;
-            font-size: ${datePx}px;
-            line-height: 1.2;
-            white-space: nowrap;
-          }
-        </style>
-      </head>
-      <body>${repeatedBody}</body>
-      </html>
-    `;
+    const rows   = Math.ceil(qty / cols);
+
+    // Use custom values when > 0, otherwise auto-calculate from label dimensions
+    const svgW     = Math.max(20, labelW - 6);
+    const svgH     = Math.max(6,  Math.floor(labelH * 0.32));
+    const datePx   = (style.fontDate  > 0) ? style.fontDate  : Math.max(5, Math.round(labelH * 0.20));
+    const mrpValPx = (style.fontMrp   > 0) ? style.fontMrp   : Math.max(7, Math.round(labelH * 0.30));
+    const namePx   = (style.fontName  > 0) ? style.fontName  : Math.max(6, Math.round(labelH * 0.27));
+    const smallPx  = (style.fontSmall > 0) ? style.fontSmall : Math.max(4, Math.round(labelH * 0.16));
+    const keyPx    = datePx;
+    const topPct   = (style.topPct     > 0) ? style.topPct     : 38;
+    const dateColPct = (style.dateColPct > 0) ? style.dateColPct : 58;
+    const mrpColPct  = 100 - dateColPct;
+    const pad      = (style.padding    > 0) ? style.padding    : 1;
+
+    const rowsHtml = Array.from({ length: rows }, (_, rowIdx) => {
+      const labelsInRow = Array.from({ length: cols }, (__, colIdx) => {
+        const labelNum = rowIdx * cols + colIdx;
+        return labelNum < qty ? labelBody : `<div class="barcode-label barcode-label-empty"></div>`;
+      }).join('');
+      const pageBreak = rowIdx > 0 ? 'style="page-break-before:always"' : '';
+      return `<div class="label-row" ${pageBreak}>${labelsInRow}</div>`;
+    }).join('');
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Barcode Label</title>
+<style>
+  @page { size: ${totalW}mm ${labelH}mm; margin: 0; }
+  html, body { width: ${totalW}mm; margin: 0; padding: 0; background: #fff; color: #000; font-family: Arial, sans-serif; }
+  .label-row { display: flex; flex-direction: row; width: ${totalW}mm; height: ${labelH}mm; page-break-inside: avoid; }
+  .barcode-label {
+    box-sizing: border-box; flex: 0 0 ${labelW}mm; width: ${labelW}mm; height: ${labelH}mm;
+    padding: ${pad}mm ${pad + 0.5}mm; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .barcode-label-empty { background: #fff; }
+
+  /* ── Top section: dates left | MRP+batch right ── */
+  .bl-top {
+    display: flex; flex-direction: row; width: 100%;
+    height: ${Math.round(labelH * topPct / 100 * 10) / 10}mm;
+    border-bottom: 0.4px solid #bbb;
+    padding-bottom: 0.3mm; margin-bottom: 0.4mm; flex-shrink: 0; overflow: hidden;
+  }
+  .bl-left {
+    flex: 0 0 ${dateColPct}%; display: flex; flex-direction: column; justify-content: center;
+    gap: 0.3mm; border-right: 0.4px solid #bbb; padding-right: 1mm; overflow: hidden;
+  }
+  .bl-date-row { display: flex; align-items: baseline; gap: 1px; }
+  .bl-key  { font-size: ${keyPx}px; font-weight: 700; min-width: 5.5mm; }
+  .bl-colon{ font-size: ${keyPx}px; font-weight: 700; margin: 0 0.5px; }
+  .bl-dval { font-size: ${datePx}px; font-weight: 700; }
+  .bl-right {
+    flex: 0 0 ${mrpColPct}%; padding-left: 1mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden;
+  }
+  .bl-mrp-key  { font-size: ${smallPx}px; font-weight: 700; line-height: 1.1; }
+  .bl-mrp-val  { font-size: ${mrpValPx}px; font-weight: 700; line-height: 1.1; }
+  .bl-batch-key{ font-size: ${smallPx}px; font-weight: 700; line-height: 1.1; margin-top: 0.3mm; }
+  .bl-batch-val{ font-size: ${keyPx}px; font-weight: 700; line-height: 1.1; }
+
+  /* ── Name + weight + barcode ── */
+  .bl-name {
+    font-size: ${namePx}px; font-weight: 700; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.2; flex-shrink: 0;
+  }
+  .bl-weight { font-size: ${smallPx}px; font-weight: 700; text-align: center; line-height: 1.2; flex-shrink: 0; }
+  .barcode-svg { width: ${svgW}mm; height: ${svgH}mm; display: block; margin: 0 auto; }
+  .bl-code { font-size: ${smallPx}px; font-weight: 700; text-align: center; line-height: 1.1; flex-shrink: 0; letter-spacing: 0.3px; }
+</style>
+</head>
+<body>${rowsHtml}</body>
+</html>`;
   },
 
   renderBarcodeSvg(root, barcode) {
@@ -313,16 +365,23 @@ const ProductsPage = {
       `,
       footer: `
         <button class="btn btn-outline" onclick="Modal.close()">Close</button>
-        <button class="btn btn-primary" id="printBarcodeBtn">${Utils.icons.print} Print</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:13px;color:var(--text-secondary);white-space:nowrap">Qty:</label>
+          <input type="number" id="printQtyInput" value="1" min="1" max="500" class="form-input" style="width:64px;text-align:center;padding:6px 8px">
+          <button class="btn btn-primary" id="printBarcodeBtn">${Utils.icons.print} Print</button>
+        </div>
       `
     });
 
     this.renderBarcodeSvg(document, product.barcode);
-    document.getElementById('printBarcodeBtn').addEventListener('click', () => this.printBarcodeLabel(product));
-    if (autoPrint) setTimeout(() => this.printBarcodeLabel(product), 300);
+    document.getElementById('printBarcodeBtn').addEventListener('click', () => {
+      const qty = Math.max(1, parseInt(document.getElementById('printQtyInput')?.value) || 1);
+      this.printBarcodeLabel(product, qty);
+    });
+    if (autoPrint) setTimeout(() => this.printBarcodeLabel(product, 1), 300);
   },
 
-  async printBarcodeLabel(product) {
+  async printBarcodeLabel(product, qty = 1) {
     if (this._printingBarcode) return;
     this._printingBarcode = true;
     const printBtn = document.getElementById('printBarcodeBtn');
@@ -334,19 +393,30 @@ const ProductsPage = {
     const printRoot = document.createElement('div');
     printRoot.innerHTML = this.labelHtml(product);
     this.renderBarcodeSvg(printRoot, product.barcode);
-    const labelW = parseFloat(await DB.getSetting('labelWidth')) || 50;
-    const labelH = parseFloat(await DB.getSetting('labelHeight')) || 30;
-    const labelColumns = parseInt(await DB.getSetting('labelColumns')) || 1;
-    const html = this.printDocumentHtml(printRoot.innerHTML, labelW, labelH, labelColumns);
+    const labelW       = parseFloat(await DB.getSetting('labelWidth'))      || 50;
+    const labelH       = parseFloat(await DB.getSetting('labelHeight'))     || 30;
+    const labelColumns = parseInt(await DB.getSetting('labelColumns'))      || 1;
+    const labelStyle = {
+      fontDate:    parseInt(await DB.getSetting('labelFontDate'))   || 0,
+      fontMrp:     parseInt(await DB.getSetting('labelFontMrp'))    || 0,
+      fontName:    parseInt(await DB.getSetting('labelFontName'))   || 0,
+      fontSmall:   parseInt(await DB.getSetting('labelFontSmall'))  || 0,
+      topPct:      parseInt(await DB.getSetting('labelTopPct'))     || 0,
+      dateColPct:  parseInt(await DB.getSetting('labelDateColPct')) || 0,
+      padding:     parseFloat(await DB.getSetting('labelPadding'))  || 0,
+    };
+    const html = this.printDocumentHtml(printRoot.innerHTML, labelW, labelH, labelColumns, qty, labelStyle);
 
     try {
       if (window.SupiriKarawala?.printLabel) {
         const labelPrinter = await DB.getSetting('labelPrinter');
         const result = await Promise.race([
           window.SupiriKarawala.printLabel(html, { deviceName: labelPrinter || undefined, labelW, labelH, labelColumns }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Print timed out')), 10000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Print timed out')), 15000))
         ]);
-        Toast.success('Printed', result?.printer ? `Barcode sent to ${result.printer}` : 'Barcode sent to printer');
+        Toast.success('Printed', result?.printer
+          ? `${qty} label${qty > 1 ? 's' : ''} sent to ${result.printer}`
+          : `${qty} label${qty > 1 ? 's' : ''} sent to printer`);
         return;
       }
 

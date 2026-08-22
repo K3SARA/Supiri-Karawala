@@ -145,6 +145,13 @@ const SettingsPage = {
               </select>
             </div>
             <div class="form-group" style="margin-bottom:16px">
+              <label class="form-label">A5 Printer</label>
+              <select class="form-select" id="setA5Printer" ${printers.length ? '' : 'disabled'}>
+                <option value="">Use Windows default</option>
+                ${printerOptions}
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:16px">
               <label class="form-label">Label Size</label>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                 <button class="btn btn-sm btn-outline label-size-preset" data-w="50" data-h="30">50×30mm</button>
@@ -170,6 +177,42 @@ const SettingsPage = {
               </div>
               <p style="margin-top:6px;color:var(--text-secondary);font-size:var(--font-size-sm)">Use "Double" when the roll has two side-by-side columns (e.g. 100mm paper split into two 50mm labels). Set the label width above to the width of one column.</p>
             </div>
+            <div class="form-group" style="margin-bottom:16px">
+              <label class="form-label" style="margin-bottom:10px">Label Font Sizes <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">(drag slider · 0 = auto)</span></label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
+                ${[
+                  ['setFontDate',  'MFD / EXP dates',      settings.labelFontDate  || 0, 16],
+                  ['setFontMrp',   'MRP price',             settings.labelFontMrp   || 0, 20],
+                  ['setFontName',  'Product name',          settings.labelFontName  || 0, 20],
+                  ['setFontSmall', 'Batch / weight / keys', settings.labelFontSmall || 0, 12],
+                ].map(([id, lbl, val, max]) => `
+                  <div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:3px">${lbl}</div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <input type="range" id="${id}" min="0" max="${max}" step="1" value="${val}" style="flex:1;accent-color:var(--accent)">
+                      <span id="${id}Val" style="min-width:28px;font-size:12px;font-weight:700;text-align:right">${val > 0 ? val + 'px' : 'auto'}</span>
+                    </div>
+                  </div>`).join('')}
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:16px">
+              <label class="form-label" style="margin-bottom:10px">Label Section Layout</label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
+                ${[
+                  ['setTopPct',      'Top section height',  settings.labelTopPct     || 38, 20, 60, 1,   '%'],
+                  ['setDateColPct',  'Date column width',   settings.labelDateColPct || 58, 30, 70, 1,   '%'],
+                  ['setLabelPad',    'Label padding',       settings.labelPadding    ||  1,  0,  5, 0.5, 'mm'],
+                ].map(([id, lbl, val, min, max, step, unit]) => `
+                  <div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:3px">${lbl}</div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}" style="flex:1;accent-color:var(--accent)">
+                      <span id="${id}Val" style="min-width:32px;font-size:12px;font-weight:700;text-align:right">${val}${unit}</span>
+                    </div>
+                  </div>`).join('')}
+              </div>
+              <button class="btn btn-sm btn-outline" id="resetLabelStyleBtn" style="margin-top:10px">↺ Reset to auto</button>
+            </div>
             <div style="display:flex;gap:12px">
               <button class="btn btn-primary" id="savePrintersBtn">${Utils.icons.check} Save</button>
               <button class="btn btn-outline" id="refreshPrintersBtn">${Utils.icons.refresh} Refresh</button>
@@ -182,6 +225,7 @@ const SettingsPage = {
         document.getElementById('setLabelPrinter').value = settings.labelPrinter || '';
         document.getElementById('setReceiptPrinter').value = settings.receiptPrinter || '';
         document.getElementById('setA4Printer').value = settings.a4Printer || '';
+        document.getElementById('setA5Printer').value = settings.a5Printer || '';
 
         document.querySelectorAll('.label-size-preset').forEach(btn => {
           btn.addEventListener('click', () => {
@@ -190,24 +234,68 @@ const SettingsPage = {
           });
         });
 
+        // Live slider value display
+        [
+          ['setFontDate',  'px'], ['setFontMrp',  'px'],
+          ['setFontName',  'px'], ['setFontSmall', 'px'],
+        ].forEach(([id, unit]) => {
+          const el = document.getElementById(id);
+          const valEl = document.getElementById(id + 'Val');
+          if (el && valEl) el.addEventListener('input', () => {
+            valEl.textContent = el.value > 0 ? el.value + unit : 'auto';
+          });
+        });
+        [
+          ['setTopPct', '%'], ['setDateColPct', '%'], ['setLabelPad', 'mm'],
+        ].forEach(([id, unit]) => {
+          const el = document.getElementById(id);
+          const valEl = document.getElementById(id + 'Val');
+          if (el && valEl) el.addEventListener('input', () => {
+            valEl.textContent = el.value + unit;
+          });
+        });
+
+        // Reset all label style to auto
+        document.getElementById('resetLabelStyleBtn').addEventListener('click', () => {
+          document.getElementById('setFontDate').value  = 0; document.getElementById('setFontDateVal').textContent  = 'auto';
+          document.getElementById('setFontMrp').value   = 0; document.getElementById('setFontMrpVal').textContent   = 'auto';
+          document.getElementById('setFontName').value  = 0; document.getElementById('setFontNameVal').textContent  = 'auto';
+          document.getElementById('setFontSmall').value = 0; document.getElementById('setFontSmallVal').textContent = 'auto';
+          document.getElementById('setTopPct').value     = 38; document.getElementById('setTopPctVal').textContent     = '38%';
+          document.getElementById('setDateColPct').value = 58; document.getElementById('setDateColPctVal').textContent = '58%';
+          document.getElementById('setLabelPad').value   =  1; document.getElementById('setLabelPadVal').textContent   = '1mm';
+        });
+
         document.getElementById('savePrintersBtn').addEventListener('click', async () => {
           await DB.setSetting('labelPrinter', document.getElementById('setLabelPrinter').value);
           await DB.setSetting('receiptPrinter', document.getElementById('setReceiptPrinter').value);
           await DB.setSetting('a4Printer', document.getElementById('setA4Printer').value);
+          await DB.setSetting('a5Printer', document.getElementById('setA5Printer').value);
           await DB.setSetting('labelWidth', document.getElementById('setLabelWidth').value);
           await DB.setSetting('labelHeight', document.getElementById('setLabelHeight').value);
           const colsEl = document.querySelector('input[name="labelColumns"]:checked');
           await DB.setSetting('labelColumns', colsEl ? colsEl.value : '1');
+          await DB.setSetting('labelFontDate',   document.getElementById('setFontDate').value);
+          await DB.setSetting('labelFontMrp',    document.getElementById('setFontMrp').value);
+          await DB.setSetting('labelFontName',   document.getElementById('setFontName').value);
+          await DB.setSetting('labelFontSmall',  document.getElementById('setFontSmall').value);
+          await DB.setSetting('labelTopPct',     document.getElementById('setTopPct').value);
+          await DB.setSetting('labelDateColPct', document.getElementById('setDateColPct').value);
+          await DB.setSetting('labelPadding',    document.getElementById('setLabelPad').value);
           Toast.success('Saved', 'Printer settings updated');
         });
         document.getElementById('refreshPrintersBtn').addEventListener('click', () => this.render());
         document.getElementById('testLabelPrinterBtn')?.addEventListener('click', async () => {
           await DB.setSetting('labelPrinter', document.getElementById('setLabelPrinter').value);
           if (typeof ProductsPage !== 'undefined' && ProductsPage.printBarcodeLabel) {
+            const today = new Date().toISOString().split('T')[0];
+            const nextYear = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             await ProductsPage.printBarcodeLabel({
               name: 'Test Label',
               barcode: '123456789012',
-              sellingPrice: 0
+              sellingPrice: 250,
+              mfgDate: today,
+              expDate: nextYear
             });
           }
         });

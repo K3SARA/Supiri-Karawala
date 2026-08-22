@@ -19,6 +19,7 @@ const App = {
     await DB.applyBusinessProfile();
     await DB.removeDemoInventoryItems();
     await DB.clearInitialInventoryItems();
+    await DB.resetToKarawalaProducts();
     await DB.finalizeCloudSync();
 
     // Check dark mode
@@ -51,6 +52,14 @@ const App = {
   showLogin() {
     document.getElementById('loginScreen').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
+
+    // The button starts disabled (see index.html) so a click can't slip through
+    // as a raw form submit while DB init above is still running.
+    const submitBtn = document.getElementById('loginSubmitBtn');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Sign In';
+    }
 
     const form = document.getElementById('loginForm');
     form.onsubmit = async (e) => {
@@ -137,6 +146,7 @@ const App = {
       suppliers: SuppliersPage,
       purchases: PurchasesPage,
       reports: ReportsPage,
+      cheques: ChequesPage,
       returns: ReturnsPage,
       expenses: ExpensesPage,
       profit: ProfitPage,

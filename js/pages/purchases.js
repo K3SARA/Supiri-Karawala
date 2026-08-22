@@ -66,8 +66,10 @@ const PurchasesPage = {
           <div class="form-group"><label class="form-label" style="font-size:11px">Product</label>
             <select class="form-select po-product" data-idx="${i}"><option value="">Select...</option>
               ${products.map(p => `<option value="${p.id}" ${item.productId == p.id ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div>
-          <div class="form-group"><label class="form-label" style="font-size:11px">Qty</label>
-            <input type="number" class="form-input po-qty" data-idx="${i}" value="${item.quantity}" min="1"></div>
+          <div class="form-group"><label class="form-label" style="font-size:11px">
+            ${(()=>{ const p = products.find(x => x.id === item.productId); return (p && p.packetSizeGrams > 0) ? 'Qty (KG)' : 'Qty'; })()}
+          </label>
+            <input type="number" class="form-input po-qty" data-idx="${i}" value="${item.quantity}" min="0.001" step="any"></div>
           <div class="form-group" style="display:flex;gap:8px;align-items:end">
             <div style="flex:1"><label class="form-label" style="font-size:11px">Price (LKR)</label>
               <input type="number" class="form-input po-price" data-idx="${i}" value="${item.buyingPrice}" min="0" step="0.01"></div>
@@ -76,19 +78,25 @@ const PurchasesPage = {
         </div>
       `).join('');
       // Update total
-      let total = 0;
-      items.forEach(it => total += (it.quantity || 0) * (it.buyingPrice || 0));
-      document.getElementById('poTotal').textContent = Utils.currency(total);
+      const updateTotal = () => {
+        let total = 0;
+        items.forEach(it => total += (it.quantity || 0) * (it.buyingPrice || 0));
+        document.getElementById('poTotal').textContent = Utils.currency(total);
+      };
+      updateTotal();
+      
       // Bind events
       document.querySelectorAll('.po-product').forEach(el => el.addEventListener('change', e => {
         const idx = parseInt(e.target.dataset.idx);
         items[idx].productId = parseInt(e.target.value);
         const prod = products.find(p => p.id === items[idx].productId);
-        if (prod) items[idx].buyingPrice = prod.costPrice || 0;
+        if (prod) {
+          items[idx].buyingPrice = (prod.packetSizeGrams > 0) ? (prod.costPrice * (1000 / prod.packetSizeGrams)) : (prod.costPrice || 0);
+        }
         renderItems();
       }));
-      document.querySelectorAll('.po-qty').forEach(el => el.addEventListener('input', e => { items[parseInt(e.target.dataset.idx)].quantity = parseInt(e.target.value) || 0; renderItems(); }));
-      document.querySelectorAll('.po-price').forEach(el => el.addEventListener('input', e => { items[parseInt(e.target.dataset.idx)].buyingPrice = parseFloat(e.target.value) || 0; renderItems(); }));
+      document.querySelectorAll('.po-qty').forEach(el => el.addEventListener('input', e => { items[parseInt(e.target.dataset.idx)].quantity = parseFloat(e.target.value) || 0; updateTotal(); }));
+      document.querySelectorAll('.po-price').forEach(el => el.addEventListener('input', e => { items[parseInt(e.target.dataset.idx)].buyingPrice = parseFloat(e.target.value) || 0; updateTotal(); }));
       document.querySelectorAll('.po-remove').forEach(el => el.addEventListener('click', e => { items.splice(parseInt(e.target.closest('[data-idx]').dataset.idx), 1); renderItems(); }));
     };
     renderItems();
@@ -96,13 +104,23 @@ const PurchasesPage = {
     document.getElementById('savePOBtn').addEventListener('click', async () => {
       const supplierId = parseInt(document.getElementById('poSupplier').value);
       if (!supplierId) { Toast.error('Required', 'Select a supplier'); return; }
-      const validItems = items.filter(i => i.productId && i.quantity > 0);
-      if (validItems.length === 0) { Toast.error('Required', 'Add at least one item'); return; }
-      const totalCost = validItems.reduce((s, i) => s + i.quantity * i.buyingPrice, 0);
+      const validItemsOriginal = items.filter(i => i.productId && i.quantity > 0);
+      if (validItemsOriginal.length === 0) { Toast.error('Required', 'Add at least one item'); return; }
+      const totalCost = validItemsOriginal.reduce((s, i) => s + i.quantity * i.buyingPrice, 0);
+      
+      const validItemsForDb = validItemsOriginal.map(i => {
+        const p = products.find(prod => prod.id === i.productId);
+        return {
+          productId: i.productId,
+          quantity: (p && p.packetSizeGrams > 0) ? i.quantity * 1000 : i.quantity,
+          buyingPrice: i.buyingPrice
+        };
+      });
+
       await DB.addPurchase({
         supplierId, date: new Date(document.getElementById('poDate').value),
         notes: document.getElementById('poNotes').value, totalCost,
-        itemCount: validItems.length, items: validItems
+        itemCount: validItemsForDb.length, items: validItemsForDb
       });
       Toast.success('Saved', 'Purchase recorded and stock updated');
       Modal.close(); this.render();

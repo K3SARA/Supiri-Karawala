@@ -142,6 +142,10 @@ const BillsPage = {
     this.products = await DB.getProducts();
     this.customers = await DB.getCustomers();
     const items = data.items.map(item => ({ ...item }));
+    // sale.discount is stored as bill-level discount + sum of item-level discounts combined.
+    // Decompose it here so the edit form's "Bill Discount" field only ever holds the bill-level part.
+    const initialItemDiscount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
+    const initialBillDiscount = Math.max(0, (data.sale.discount || 0) - initialItemDiscount);
     const historicalTaxBase = Math.max(0, (data.sale.subtotal || 0) - (data.sale.discount || 0));
     const taxRate = data.sale.taxRate != null
       ? parseFloat(data.sale.taxRate || 0)
@@ -171,7 +175,7 @@ const BillsPage = {
         <div id="billEditItems"></div>
         <button class="btn btn-sm btn-outline" id="billAddItemBtn" style="margin:12px 0">${Utils.icons.plus} Add Item</button>
         <div class="form-row" style="margin-top:8px">
-          <div class="form-group"><label class="form-label">Discount</label><input type="number" class="form-input" id="billDiscount" value="${data.sale.discount || 0}" min="0" step="0.01"></div>
+          <div class="form-group"><label class="form-label">Bill Discount</label><input type="number" class="form-input" id="billDiscount" value="${initialBillDiscount.toFixed(2)}" min="0" step="0.01"></div>
           <div class="form-group"><label class="form-label">Amount Paid</label><input type="number" class="form-input" id="billAmountPaid" value="${editableAmountPaid}" min="0" step="0.01"></div>
         </div>
         <div class="bill-summary-box" id="billEditTotals"></div>
@@ -194,7 +198,7 @@ const BillsPage = {
           </div>
           <div class="form-group">
             <label class="form-label">Qty</label>
-            <input type="number" class="form-input bill-item-qty" data-idx="${idx}" value="${item.quantity || 1}" min="1">
+            <input type="number" class="form-input bill-item-qty" data-idx="${idx}" value="${item.quantity || 1}" min="0.001" step="any">
           </div>
           <div class="form-group">
             <label class="form-label">Price</label>
@@ -214,7 +218,7 @@ const BillsPage = {
         item.productId = productId;
         item.name = product?.name || item.name;
         item.costPrice = product?.costPrice || item.costPrice || 0;
-        item.quantity = parseInt(document.querySelector(`.bill-item-qty[data-idx="${idx}"]`)?.value, 10) || 1;
+        item.quantity = parseFloat(document.querySelector(`.bill-item-qty[data-idx="${idx}"]`)?.value) || 1;
         item.price = parseFloat(document.querySelector(`.bill-item-price[data-idx="${idx}"]`)?.value) || 0;
         item.discount = item.discount || 0;
         item.total = item.quantity * item.price - (item.discount || 0);
@@ -224,12 +228,14 @@ const BillsPage = {
     const updateTotals = () => {
       syncItemsFromInputs();
       const subtotal = items.reduce((sum, item) => sum + (item.quantity || 0) * (item.price || 0), 0);
-      let discount = parseFloat(document.getElementById('billDiscount')?.value) || 0;
-      if (discount > subtotal) {
-        discount = subtotal;
-        document.getElementById('billDiscount').value = subtotal.toFixed(2);
+      const totalItemDiscount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
+      const maxBillDiscount = Math.max(0, subtotal - totalItemDiscount);
+      let billDiscount = parseFloat(document.getElementById('billDiscount')?.value) || 0;
+      if (billDiscount > maxBillDiscount) {
+        billDiscount = maxBillDiscount;
+        document.getElementById('billDiscount').value = maxBillDiscount.toFixed(2);
       }
-      const taxableAmount = Math.max(0, subtotal - discount);
+      const taxableAmount = Math.max(0, subtotal - totalItemDiscount - billDiscount);
       const tax = taxableAmount * (taxRate / 100);
       const total = taxableAmount + tax;
       const amountPaid = parseFloat(document.getElementById('billAmountPaid')?.value) || 0;
@@ -238,6 +244,7 @@ const BillsPage = {
       if (box) {
         box.innerHTML = `
           <div><span>Subtotal</span><strong>${Utils.currency(subtotal)}</strong></div>
+          ${totalItemDiscount > 0 ? `<div><span>Item Discount</span><strong>${Utils.currency(totalItemDiscount)}</strong></div>` : ''}
           <div><span>${Utils.escapeHtml(taxName)} (${taxRate.toFixed(2)}%)</span><strong>${Utils.currency(tax)}</strong></div>
           <div><span>Due</span><strong>${Utils.currency(dueAmount)}</strong></div>
           <div class="bill-summary-total"><span>Total</span><strong>${Utils.currency(total)}</strong></div>
@@ -290,6 +297,17 @@ const BillsPage = {
         total: product.sellingPrice || 0
       });
       renderItems();
+      // New rows default to the first product in the list — open its picker
+      // immediately so the cashier chooses the actual item instead of missing
+      // that it needs to be changed.
+      const newIdx = items.length - 1;
+      const newSelect = document.querySelector(`.bill-item-product[data-idx="${newIdx}"]`);
+      if (newSelect) {
+        newSelect.focus();
+        if (typeof newSelect.showPicker === 'function') {
+          try { newSelect.showPicker(); } catch (e) {}
+        }
+      }
     });
     document.getElementById('billDiscount').addEventListener('input', updateTotals);
     document.getElementById('billAmountPaid').addEventListener('input', updateTotals);
@@ -303,12 +321,13 @@ const BillsPage = {
       }
 
       const subtotal = items.reduce((sum, item) => sum + item.quantity * item.price, 0);
-      const discount = parseFloat(document.getElementById('billDiscount').value) || 0;
-      if (discount > subtotal) {
+      const totalItemDiscount = items.reduce((sum, item) => sum + (item.discount || 0), 0);
+      const billDiscount = parseFloat(document.getElementById('billDiscount').value) || 0;
+      if (billDiscount > Math.max(0, subtotal - totalItemDiscount)) {
         Toast.error('Invalid', 'Discount cannot be greater than subtotal');
         return;
       }
-      const taxableAmount = Math.max(0, subtotal - discount);
+      const taxableAmount = Math.max(0, subtotal - totalItemDiscount - billDiscount);
       const tax = taxableAmount * (taxRate / 100);
       const total = taxableAmount + tax;
       const amountPaid = parseFloat(document.getElementById('billAmountPaid').value) || 0;
@@ -324,7 +343,7 @@ const BillsPage = {
           tax,
           taxRate,
           taxName,
-          discount,
+          discount: billDiscount + totalItemDiscount,
           total,
           amountPaid,
           change,

@@ -74,7 +74,7 @@ const ReturnsPage = {
           <div style="display:flex;align-items:center;gap:12px;padding:8px;border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:8px">
             <input type="checkbox" id="retItem${i}" class="return-check" data-idx="${i}" ${disabled ? 'disabled' : ''} style="width:18px;height:18px">
             <div style="flex:1"><strong>${item.name}</strong><br><small>Sold: ${item.quantity} x ${Utils.currency(item.price)} | Returned: ${returnedQty} | Available: ${maxQty}</small></div>
-            <div><label style="font-size:12px">Return Qty:</label><input type="number" class="form-input ret-qty" data-idx="${i}" value="${maxQty > 0 ? maxQty : 0}" min="1" max="${maxQty}" ${disabled ? 'disabled' : ''} style="width:70px;padding:4px 8px"></div>
+            <div><label style="font-size:12px">Return Qty:</label><input type="number" class="form-input ret-qty" data-idx="${i}" value="${maxQty > 0 ? maxQty : 0}" min="0.001" step="any" max="${maxQty}" ${disabled ? 'disabled' : ''} style="width:70px;padding:4px 8px"></div>
           </div>
         `;
       }).join('');
@@ -113,7 +113,7 @@ const ReturnsPage = {
 
         checks.forEach(chk => {
           const idx = parseInt(chk.dataset.idx, 10);
-          const qty = parseInt(document.querySelector(`.ret-qty[data-idx="${idx}"]`).value, 10) || 0;
+          const qty = parseFloat(document.querySelector(`.ret-qty[data-idx="${idx}"]`).value) || 0;
           const item = saleItems[idx];
           const key = item.variationId ? `v:${item.variationId}` : `p:${item.productId}`;
           const returnedQty = returnedQtyByItem[key] || 0;

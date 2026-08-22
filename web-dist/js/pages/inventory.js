@@ -7,9 +7,22 @@ const InventoryPage = {
     content.style.overflow = '';
 
     const products = await DB.getProducts();
-    const lowStock = products.filter(p => (p.stock || 0) <= (p.reorderLevel || 5));
-    const totalStock = products.reduce((s, p) => s + (p.stock || 0), 0);
-    const totalValue = products.reduce((s, p) => s + (p.stock || 0) * (p.costPrice || 0), 0);
+    const lowStock = products.filter(p => {
+      const gpp = p.packetSizeGrams || 0;
+      if (gpp > 0) return ((p.stock || 0) / gpp) <= (p.reorderLevel || 5);
+      return (p.stock || 0) <= (p.reorderLevel || 5);
+    });
+    const totalKg = products.filter(p => p.packetSizeGrams > 0).reduce((s, p) => s + (p.stock || 0), 0) / 1000;
+    const totalUnits = products.filter(p => !p.packetSizeGrams).reduce((s, p) => s + (p.stock || 0), 0);
+    const totalStockDisplay = [
+      totalKg > 0 ? `${totalKg.toFixed(1)} kg` : '',
+      totalUnits > 0 ? `${totalUnits} units` : ''
+    ].filter(Boolean).join(' + ') || '0';
+    const totalValue = products.reduce((s, p) => {
+      const gpp = p.packetSizeGrams || 0;
+      const packets = gpp > 0 ? (p.stock || 0) / gpp : (p.stock || 0);
+      return s + packets * (p.costPrice || 0);
+    }, 0);
     const canManageStock = App.hasFullAccess();
     const canStockIn = App.canStockIn();
 
@@ -45,8 +58,8 @@ const InventoryPage = {
         <div class="stat-card">
           <div class="stat-card-icon green">${Utils.icons.inventory}</div>
           <div class="stat-card-info">
-            <span class="stat-card-label">Total Stock Units</span>
-            <span class="stat-card-value">${totalStock.toLocaleString()}</span>
+            <span class="stat-card-label">Total Stock</span>
+            <span class="stat-card-value" style="font-size:14px">${totalStockDisplay}</span>
           </div>
         </div>
         <div class="stat-card">
@@ -75,17 +88,26 @@ const InventoryPage = {
         { key: 'name', label: 'Product', render: r => `<strong>${r.name}</strong>` },
         { key: 'barcode', label: 'Barcode' },
         { key: 'stock', label: 'Current Stock', render: r => {
-          const low = (r.stock || 0) <= (r.reorderLevel || 5);
-          return `<span class="badge ${low ? 'badge-danger badge-dot' : 'badge-success'}">${r.stock || 0}</span>`;
+          const gpp = r.packetSizeGrams || 0;
+          const stockText = gpp > 0 ? `${((r.stock || 0) / 1000).toFixed(2)} kg` : (r.stock || 0);
+          const low = gpp > 0
+            ? ((r.stock || 0) / gpp) <= (r.reorderLevel || 5)
+            : (r.stock || 0) <= (r.reorderLevel || 5);
+          return `<span class="badge ${low ? 'badge-danger badge-dot' : 'badge-success'}">${stockText}</span>`;
         }},
         { key: 'reorderLevel', label: 'Reorder Level' },
         { key: 'costPrice', label: 'Cost Price', render: r => Utils.currency(r.costPrice) },
-        { key: 'stockValue', label: 'Stock Value', render: r => Utils.currency((r.stock || 0) * (r.costPrice || 0)) },
+        { key: 'stockValue', label: 'Stock Value', render: r => {
+          const gpp = r.packetSizeGrams || 0;
+          const packets = gpp > 0 ? (r.stock || 0) / gpp : (r.stock || 0);
+          return Utils.currency(packets * (r.costPrice || 0));
+        }},
         { key: 'status', label: 'Status', render: r => {
-          const s = r.stock || 0;
+          const gpp = r.packetSizeGrams || 0;
+          const effective = gpp > 0 ? ((r.stock || 0) / gpp) : (r.stock || 0);
           const rl = r.reorderLevel || 5;
-          if (s <= 0) return '<span class="badge badge-danger">Out of Stock</span>';
-          if (s <= rl) return '<span class="badge badge-warning">Low Stock</span>';
+          if (effective <= 0.001) return '<span class="badge badge-danger">Out of Stock</span>';
+          if (effective <= rl) return '<span class="badge badge-warning">Low Stock</span>';
           return '<span class="badge badge-success">In Stock</span>';
         }},
       ],
@@ -121,13 +143,20 @@ const InventoryPage = {
           <label class="form-label">Product <span class="required">*</span></label>
           <select class="form-select" id="adjProduct">
             <option value="">Select product...</option>
-            ${products.map(p => `<option value="${p.id}">${p.name} (Current: ${p.stock})</option>`).join('')}
+            ${products.map(p => {
+              const gpp = p.packetSizeGrams || 0;
+              const stockDisplay = gpp > 0
+                ? `${(p.stock / 1000).toFixed(2)}kg (${Math.floor(p.stock / gpp)} pkts)`
+                : p.stock;
+              return `<option value="${p.id}" data-gpp="${gpp}">${p.name} — Current: ${stockDisplay}</option>`;
+            }).join('')}
           </select>
         </div>
         <div class="form-row" style="margin-bottom:16px">
           <div class="form-group">
-            <label class="form-label">Quantity <span class="required">*</span></label>
-            <input type="number" class="form-input" id="adjQty" min="1" value="1">
+            <label class="form-label" id="adjQtyLabel">Quantity <span class="required">*</span></label>
+            <input type="number" class="form-input" id="adjQty" min="0.001" step="any" value="1">
+            <span id="adjQtyNote" style="font-size:11px;color:var(--primary);margin-top:3px;display:block;min-height:14px"></span>
           </div>
           <div class="form-group">
             <label class="form-label">Type</label>
@@ -157,9 +186,37 @@ const InventoryPage = {
     });
 
     const productSelect = document.getElementById('adjProduct');
-    const typeSelect = document.getElementById('adjType');
-    const costGroup = document.getElementById('adjCostGroup');
-    const costInput = document.getElementById('adjCostPrice');
+    const typeSelect    = document.getElementById('adjType');
+    const costGroup     = document.getElementById('adjCostGroup');
+    const costInput     = document.getElementById('adjCostPrice');
+    const adjQtyLabel   = document.getElementById('adjQtyLabel');
+    const adjQtyInput   = document.getElementById('adjQty');
+    const adjQtyNote    = document.getElementById('adjQtyNote');
+
+    const syncQtyLabel = () => {
+      const product = products.find(p => p.id === parseInt(productSelect.value, 10));
+      const gpp = product?.packetSizeGrams || 0;
+      if (gpp > 0) {
+        adjQtyLabel.innerHTML = 'Quantity <span style="background:var(--primary);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;vertical-align:middle">GRAMS</span> <span class="required">*</span>';
+        adjQtyInput.placeholder = `e.g. 400000 for 400kg`;
+        const g = parseFloat(adjQtyInput.value) || 0;
+        adjQtyNote.textContent = g > 0 ? `${(g / 1000).toFixed(2)} kg  ·  ${(g / gpp).toFixed(2)} packets` : '';
+      } else {
+        adjQtyLabel.innerHTML = 'Quantity <span class="required">*</span>';
+        adjQtyInput.placeholder = '';
+        adjQtyNote.textContent = '';
+      }
+    };
+
+    adjQtyInput.addEventListener('input', () => {
+      const product = products.find(p => p.id === parseInt(productSelect.value, 10));
+      const gpp = product?.packetSizeGrams || 0;
+      if (gpp > 0) {
+        const g = parseFloat(adjQtyInput.value) || 0;
+        adjQtyNote.textContent = g > 0 ? `${(g / 1000).toFixed(2)} kg  ·  ${(g / gpp).toFixed(2)} packets` : '';
+      }
+    });
+
     const syncCostField = () => {
       const selectedType = typeSelect.value;
       costGroup.style.display = selectedType === 'in' ? 'block' : 'none';
@@ -168,12 +225,12 @@ const InventoryPage = {
         costInput.value = (product.costPrice || 0).toFixed(2);
       }
     };
-    productSelect.addEventListener('change', syncCostField);
+    productSelect.addEventListener('change', () => { syncCostField(); syncQtyLabel(); });
     typeSelect.addEventListener('change', syncCostField);
 
     document.getElementById('saveAdjBtn').addEventListener('click', async () => {
       const productId = parseInt(document.getElementById('adjProduct').value);
-      const quantity = parseInt(document.getElementById('adjQty').value) || 0;
+      const quantity = parseFloat(document.getElementById('adjQty').value) || 0;
       const adjType = document.getElementById('adjType').value;
       const costPrice = parseFloat(document.getElementById('adjCostPrice').value) || 0;
       const reason = document.getElementById('adjReason').value.trim();

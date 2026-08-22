@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -40,7 +40,14 @@ function createWindow() {
   // Show when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    mainWindow.maximize();
+    // On Windows, maximize to the work area so content never hides behind the taskbar
+    if (process.platform === 'win32') {
+      const { screen } = require('electron');
+      const { workArea } = screen.getPrimaryDisplay();
+      mainWindow.setBounds(workArea);
+    } else {
+      mainWindow.maximize();
+    }
   });
 
   // Remove default menu bar
@@ -121,6 +128,8 @@ ipcMain.handle('labels:print', async (_event, html, options = {}) => {
     labelWindow.close();
   }
 });
+
+ipcMain.handle('shell:openExternal', (_event, url) => shell.openExternal(url));
 
 function runPowerShell(script) {
   return new Promise((resolve, reject) => {

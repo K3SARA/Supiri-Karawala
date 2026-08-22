@@ -35,7 +35,7 @@ const DataTable = {
       html += `<div class="data-table-wrapper"><table class="data-table">
         <thead><tr>
           ${columns.map(col => `<th class="${col.sortable !== false ? 'sortable' : ''}" data-key="${col.key}">${col.label}</th>`).join('')}
-          ${actions ? '<th style="width:100px">Actions</th>' : ''}
+          ${actions ? '<th class="dt-actions-col" style="width:100px">Actions</th>' : ''}
         </tr></thead>
         <tbody>`;
 
@@ -51,7 +51,7 @@ const DataTable = {
             html += `<td>${val}</td>`;
           });
           if (actions) {
-            html += `<td><div class="table-actions">${actions(row)}</div></td>`;
+            html += `<td class="dt-actions-col"><div class="table-actions">${actions(row)}</div></td>`;
           }
           html += `</tr>`;
         });

@@ -97,7 +97,7 @@
 /* App Shell */
 .app {
   display: flex;
-  height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
 }
@@ -106,7 +106,7 @@
 .sidebar {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
-  height: 100vh;
+  height: 100dvh;
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
@@ -325,7 +325,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -736,7 +736,7 @@
     position: fixed;
     left: -100%;
     top: 0;
-    height: 100vh;
+    height: 100dvh;
     width: 280px !important;
     min-width: 280px !important;
     z-index: var(--z-sidebar);
@@ -867,14 +867,20 @@
   }
 }
 
+/* Prevent Android/iOS WebView auto-zoom on input focus — applies at ALL viewport widths */
+input, textarea, select {
+  font-size: 16px !important;
+  -webkit-text-fill-color: var(--text-primary);
+  color: var(--text-primary);
+}
+input::placeholder, textarea::placeholder {
+  -webkit-text-fill-color: var(--text-secondary);
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
 /* ===== ANDROID / MOBILE TOUCH FIXES ===== */
 @media (max-width: 768px) {
-  /* Prevent Android/iOS auto-zoom on input focus (triggers when font-size < 16px) */
-  input.form-input,
-  select.form-select,
-  textarea.form-textarea {
-    font-size: 16px !important;
-  }
 
   /* Larger touch targets for buttons and interactive elements */
   .btn {

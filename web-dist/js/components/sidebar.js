@@ -23,6 +23,7 @@ const Sidebar = {
       { id: 'customers', label: 'Customers', icon: 'customers' },
       { id: 'suppliers', label: 'Suppliers', icon: 'suppliers', adminOnly: true },
       { id: 'purchases', label: 'Purchases', icon: 'purchases', adminOnly: true },
+      { id: 'cheques', label: 'Cheques', icon: 'cheques', adminOnly: true },
       { id: 'returns', label: 'Returns', icon: 'returns' },
       { id: 'expenses', label: 'Expenses', icon: 'expenses', adminOnly: true },
       { id: 'reports', label: 'Reports', icon: 'reports', adminOnly: true },

@@ -26,6 +26,12 @@ const DB = {
       users: '++id, username, role',
       settings: 'key'
     });
+    this.db.version(2).stores({
+      cheques: '++id, paymentId, customerId, supplierId, saleId, chequeNumber, bankName, status, dueDate, receivedDate, createdAt'
+    });
+    this.db.version(3).stores({
+      syncQueue: '++id, method, timestamp'
+    });
     await this.db.open();
 
     // Read cloud settings before initialization
@@ -104,6 +110,56 @@ const DB = {
     await this.setSetting(migrationKey, 'print-care-plus-empty-inventory-2026-05-24');
   },
 
+  async resetToKarawalaProducts() {
+    const migrationKey = 'karawalaProductsV1';
+    if (await this.getSetting(migrationKey) === 'done') return;
+
+    await this.db.transaction('rw', this.db.products, this.db.categories, this.db.variations, async () => {
+      await this.db.variations.clear();
+      await this.db.products.clear();
+      await this.db.categories.clear();
+    });
+
+    const cats = {};
+    cats['Karawala'] = await this.db.categories.add({ name: 'Karawala' });
+    cats['Sprats']   = await this.db.categories.add({ name: 'Sprats' });
+    cats['Spices']   = await this.db.categories.add({ name: 'Spices' });
+    cats['Other']    = await this.db.categories.add({ name: 'Other' });
+
+    const items = [
+      { name: 'Balaya',          barcode: 'KW001', categoryId: cats['Karawala'] },
+      { name: 'Linna',           barcode: 'KW002', categoryId: cats['Karawala'] },
+      { name: 'Kukula',          barcode: 'KW003', categoryId: cats['Karawala'] },
+      { name: 'Keerameen',       barcode: 'KW004', categoryId: cats['Karawala'] },
+      { name: 'Katthah',         barcode: 'KW005', categoryId: cats['Karawala'] },
+      { name: 'Lanka Keegan',    barcode: 'KW006', categoryId: cats['Karawala'] },
+      { name: 'Koonisso',        barcode: 'KW007', categoryId: cats['Karawala'] },
+      { name: 'Bombilly',        barcode: 'KW008', categoryId: cats['Karawala'] },
+      { name: 'Lena Paraw',      barcode: 'KW009', categoryId: cats['Karawala'] },
+      { name: 'Sparts Lanka',    barcode: 'SP001', categoryId: cats['Sprats']   },
+      { name: 'Sparts Iran',     barcode: 'SP002', categoryId: cats['Sprats']   },
+      { name: 'Sparts Thailand', barcode: 'SP003', categoryId: cats['Sprats']   },
+      { name: 'Chilly P',        barcode: 'SC001', categoryId: cats['Spices']   },
+      { name: 'Masala',          barcode: 'SC002', categoryId: cats['Spices']   },
+      { name: 'R. Masala',       barcode: 'SC003', categoryId: cats['Spices']   },
+      { name: 'Cutter P',        barcode: 'SC004', categoryId: cats['Spices']   },
+      { name: 'Safroon',         barcode: 'SC005', categoryId: cats['Spices']   },
+      { name: 'Cumin Sheed P',   barcode: 'SC006', categoryId: cats['Spices']   },
+      { name: 'Temric',          barcode: 'SC007', categoryId: cats['Spices']   },
+      { name: 'Kiri Moru',       barcode: 'OT001', categoryId: cats['Other']    },
+      { name: 'Hurullo',         barcode: 'OT002', categoryId: cats['Other']    },
+    ];
+
+    for (const item of items) {
+      await this.db.products.add({
+        ...item,
+        sellingPrice: 0, costPrice: 0, stock: 0, reorderLevel: 5, createdAt: new Date()
+      });
+    }
+
+    await this.setSetting(migrationKey, 'done');
+  },
+
   async initCloudSync() {
     const isLocalFile = location.protocol === 'file:';
     const hasOverride = this._cloudEnabledOverride && this._cloudUrl;
@@ -159,6 +215,7 @@ const DB = {
     }
 
     this.wrapCloudMethods();
+    this.startBackgroundSync();
   },
 
   wrapCloudMethods() {
@@ -172,7 +229,8 @@ const DB = {
       'getPurchases','getPurchase','getPurchaseItems','getReturns','getReturnItems',
       'getStockAdjustments','getExpenses','getExpense','getPayments','getUsers','getUser',
       'getUserByUsername','getSetting','getAllSettings','getLowStockProducts',
-      'getDailySales','getMonthlySales'
+      'getDailySales','getMonthlySales','getCheques','getChequeById','getChequeSummary',
+      'getCustomerChequeStats'
     ];
     const writeMethods = [
       'addProduct','updateProduct','deleteProduct','addCategory','updateCategory',
@@ -180,87 +238,108 @@ const DB = {
       'updateCustomer','deleteCustomer','addSupplier','updateSupplier','deleteSupplier',
       'addSale','updateSale','voidSale','addPurchase','reversePurchase','addReturn',
       'addStockAdjustment','addExpense','updateExpense','deleteExpense','addPayment',
+      'addCheque','updateCheque','updateChequeStatus','deleteCheque','addPaymentWithCheque',
       'addUser','updateUser','deleteUser','ensureDefaultUserAccounts','setSetting','importData',
       'applyBusinessProfile','seedIfEmpty'
     ];
 
     readMethods.forEach(name => {
-      if (typeof this[name] !== 'function') return;
-      const original = this[name].bind(this);
-      this[name] = async (...args) => {
-        try { await this.pullFromCloud(); } catch (e) {
-          console.warn(`pullFromCloud failed for ${name}, using local data:`, e.message);
-        }
-        return original(...args);
-      };
+      // Local reads are completely instant now!
+      // Background worker handles pulling updates if there are any.
     });
 
     writeMethods.forEach(name => {
       if (typeof this[name] !== 'function') return;
+      const original = this[name].bind(this);
       this[name] = async (...args) => {
-        return await this.mutateCloud(name, args);
+        // Optimistic UI: Apply mutation locally immediately
+        const result = await original(...args);
+        
+        // Queue it for cloud synchronization
+        if (this.cloudEnabled && !this._applyingCloudSnapshot && name !== 'importData' && name !== 'seedIfEmpty') {
+          await this.db.syncQueue.add({
+            method: name,
+            args: args,
+            timestamp: new Date().getTime()
+          });
+          // Trigger queue processing (non-blocking)
+          this.processSyncQueue().catch(e => console.warn('Background sync trigger failed', e));
+        }
+        return result;
       };
     });
   },
 
-  async mutateCloud(method, args) {
-    if (!this.cloudEnabled || this._applyingCloudSnapshot) return null;
-
-    const res = await fetch(this.getCloudUrl('/api/db/mutate'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ method, args })
-    });
-
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `Cloud mutation failed (${res.status})`);
-
-    this._applyingCloudSnapshot = true;
-    await this.importData(this.reviveDataDates(body.data));
-    this._applyingCloudSnapshot = false;
-    this.cloudRevision = body.revision || this.cloudRevision;
-    return body.result;
+  async processSyncQueue() {
+    if (this._isSyncing || !this.cloudEnabled || this._applyingCloudSnapshot) return;
+    this._isSyncing = true;
+    
+    try {
+      const pending = await this.db.syncQueue.orderBy('id').toArray();
+      for (const item of pending) {
+        const res = await fetch(this.getCloudUrl('/api/db/mutate'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: item.method, args: item.args })
+        });
+        
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) {
+          await this.db.syncQueue.delete(item.id);
+          this.cloudRevision = body.revision || this.cloudRevision;
+          window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pending: await this.db.syncQueue.count() } }));
+        } else {
+          throw new Error(body.error || `Cloud mutation failed (${res.status})`);
+        }
+      }
+    } catch (e) {
+      console.warn('Sync queue process error:', e);
+    } finally {
+      this._isSyncing = false;
+      const pendingCount = await this.db.syncQueue.count().catch(() => 0);
+      window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pending: pendingCount } }));
+    }
   },
 
   async fetchCloudSnapshot() {
-    const res = await fetch(this.getCloudUrl('/api/db/snapshot'), { cache: 'no-store' });
+    const res = await fetch(this.getCloudUrl(`/api/db/snapshot?revision=${this.cloudRevision || 0}`), { cache: 'no-store' });
     if (!res.ok) throw new Error(`Cloud snapshot fetch failed (${res.status})`);
     return await res.json();
   },
 
-  async pullFromCloud() {
+  async pollCloudRevision() {
     if (!this.cloudEnabled || this._applyingCloudSnapshot) return;
-    const snapshot = await this.fetchCloudSnapshot();
-    if (!snapshot.initialized || !snapshot.data || snapshot.revision === this.cloudRevision) return;
+    try {
+      const pendingCount = await this.db.syncQueue.count();
+      if (pendingCount > 0) return; // Wait until local changes are pushed before pulling
 
-    this._applyingCloudSnapshot = true;
-    await this.importData(this.reviveDataDates(snapshot.data));
-    this._applyingCloudSnapshot = false;
-    this.cloudRevision = snapshot.revision || 0;
+      const snapshot = await this.fetchCloudSnapshot();
+      if (!snapshot.initialized || !snapshot.data || snapshot.revision <= this.cloudRevision) return;
+      
+      // Secondary check in case queue changed during fetch
+      const pendingCountPost = await this.db.syncQueue.count();
+      if (pendingCountPost > 0) return; 
+
+      this._applyingCloudSnapshot = true;
+      await this.importData(this.reviveDataDates(snapshot.data));
+      this._applyingCloudSnapshot = false;
+      this.cloudRevision = snapshot.revision;
+      window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pulled: true, pending: 0 } }));
+    } catch (e) {
+      console.warn('Polling cloud revision failed', e);
+    }
   },
 
-  async syncToCloud() {
-    if (!this.cloudEnabled || this._applyingCloudSnapshot) return;
-
-    const data = await this.exportData();
-    const res = await fetch(this.getCloudUrl('/api/db/snapshot'), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ revision: this.cloudRevision, data })
-    });
-
-    if (res.status === 409) {
-      const conflict = await res.json();
-      this._applyingCloudSnapshot = true;
-      await this.importData(this.reviveDataDates(conflict.data));
-      this._applyingCloudSnapshot = false;
-      this.cloudRevision = conflict.revision || 0;
-      throw new Error('Cloud data changed in another browser. The latest database was reloaded; please try again.');
-    }
-
-    if (!res.ok) throw new Error(`Cloud sync failed (${res.status})`);
-    const result = await res.json();
-    this.cloudRevision = result.revision || this.cloudRevision;
+  startBackgroundSync() {
+    if (this._syncInterval) clearInterval(this._syncInterval);
+    if (this._pollInterval) clearInterval(this._pollInterval);
+    
+    this._syncInterval = setInterval(() => this.processSyncQueue(), 5000);
+    this._pollInterval = setInterval(() => this.pollCloudRevision(), 15000);
+    
+    this.db.syncQueue.count().then(pending => {
+      window.dispatchEvent(new CustomEvent('sync-status-change', { detail: { pending } }));
+    }).catch(() => {});
   },
 
   reviveDataDates(data) {
@@ -289,9 +368,9 @@ const DB = {
     if (await this.getSetting(migrationKey) === 'print-care-plus-2026-05') return;
 
     await this.db.settings.bulkPut([
-      { key: 'shopName', value: 'Supiri Karawala' },
-      { key: 'shopAddress', value: 'Daulagala Handassa' },
-      { key: 'shopPhone', value: '077 944 5144' },
+      { key: 'shopName', value: 'SLS' },
+      { key: 'shopAddress', value: 'General merchants & wholesale and retail dealers in rice, oil, dried fish, prawns, bomba duck, golden anchovy and all kinds of fish products.' },
+      { key: 'shopPhone', value: '' },
       { key: migrationKey, value: 'print-care-plus-2026-05' }
     ]);
   },
@@ -338,13 +417,13 @@ const DB = {
   // ======= SALES =======
   async getSales() {
     const sales = await this.db.sales.orderBy('createdAt').reverse().toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
   async getAllSales() { return await this.db.sales.orderBy('createdAt').reverse().toArray(); },
   async getSale(id) { return await this.db.sales.get(id); },
   async getSalesByDate(start, end) {
     const sales = await this.db.sales.where('createdAt').between(start, end, true, true).toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
   async addSale(sale) {
     return await this.db.transaction(
@@ -376,16 +455,20 @@ const DB = {
 
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (!v || (v.stock || 0) < item.quantity) {
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const vDeduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
+            if (!v || (v.stock || 0) < vDeduction) {
               throw new Error(`Insufficient stock for variation ${item.variationId}`);
             }
-            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - item.quantity });
+            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - vDeduction });
           } else {
             const p = await this.db.products.get(item.productId);
-            if (!p || (p.stock || 0) < item.quantity) {
-              throw new Error(`Insufficient stock for product ${item.productId}`);
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const deduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
+            if (!p || (p.stock || 0) < deduction) {
+              throw new Error(`Insufficient stock for ${p?.name || 'product'}`);
             }
-            await this.db.products.update(item.productId, { stock: (p.stock || 0) - item.quantity });
+            await this.db.products.update(item.productId, { stock: Math.max(0, (p.stock || 0) - deduction) });
           }
         }
 
@@ -441,12 +524,14 @@ const DB = {
         const oldItems = await this.db.saleItems.where('saleId').equals(saleId).toArray();
 
         for (const item of oldItems) {
+          const netQty = Math.max(0, (item.quantity || 0) - (item.boxWeight || 0));
+          const restoreAmt = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + (item.quantity || 0) });
+            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + restoreAmt });
           } else {
             const p = await this.db.products.get(item.productId);
-            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + (item.quantity || 0) });
+            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + restoreAmt });
           }
         }
 
@@ -471,16 +556,20 @@ const DB = {
 
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (!v || (v.stock || 0) < item.quantity) {
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const vDeduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
+            if (!v || (v.stock || 0) < vDeduction) {
               throw new Error(`Insufficient stock for variation ${item.variationId}`);
             }
-            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - item.quantity });
+            await this.db.variations.update(item.variationId, { stock: (v.stock || 0) - vDeduction });
           } else {
             const p = await this.db.products.get(item.productId);
-            if (!p || (p.stock || 0) < item.quantity) {
-              throw new Error(`Insufficient stock for product ${item.productId}`);
+            const netQty = Math.max(0, item.quantity - (item.boxWeight || 0));
+            const deduction = (item.gramsPerPacket > 0) ? netQty * item.gramsPerPacket : netQty;
+            if (!p || (p.stock || 0) < deduction) {
+              throw new Error(`Insufficient stock for ${p?.name || 'product'}`);
             }
-            await this.db.products.update(item.productId, { stock: (p.stock || 0) - item.quantity });
+            await this.db.products.update(item.productId, { stock: Math.max(0, (p.stock || 0) - deduction) });
           }
         }
 
@@ -539,15 +628,17 @@ const DB = {
         for (const item of items) {
           const key = item.variationId ? `v:${item.variationId}` : `p:${item.productId}`;
           const returnQty = returnedQtyByItem[key] || 0;
-          const restoreQty = Math.max(0, (item.quantity || 0) - returnQty);
+          const netQty = Math.max(0, (item.quantity || 0) - (item.boxWeight || 0));
+          const restoreQty = Math.max(0, netQty - returnQty);
           if (restoreQty <= 0) continue;
 
+          const restoreAmt = (item.gramsPerPacket > 0) ? restoreQty * item.gramsPerPacket : restoreQty;
           if (item.variationId) {
             const v = await this.db.variations.get(item.variationId);
-            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + restoreQty });
+            if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + restoreAmt });
           } else {
             const p = await this.db.products.get(item.productId);
-            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + restoreQty });
+            if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + restoreAmt });
           }
         }
 
@@ -596,9 +687,23 @@ const DB = {
               const currentCost = p.costPrice || 0;
               const incomingCost = item.buyingPrice || currentCost;
               const newStock = currentStock + incomingQty;
-              const weightedCost = newStock > 0
-                ? ((currentStock * currentCost) + (incomingQty * incomingCost)) / newStock
-                : incomingCost;
+              const gpp = p.packetSizeGrams || 0;
+              let actualIncomingCostPerPacket = incomingCost;
+              if (gpp > 0) {
+                 actualIncomingCostPerPacket = incomingCost * (gpp / 1000);
+              }
+              
+              let weightedCost = actualIncomingCostPerPacket;
+              if (newStock > 0) {
+                if (gpp > 0) {
+                   const currentPackets = currentStock / gpp;
+                   const incomingPackets = incomingQty / gpp;
+                   const newPackets = newStock / gpp;
+                   weightedCost = ((currentPackets * currentCost) + (incomingPackets * actualIncomingCostPerPacket)) / newPackets;
+                } else {
+                   weightedCost = ((currentStock * currentCost) + (incomingQty * actualIncomingCostPerPacket)) / newStock;
+                }
+              }
 
               await this.db.products.update(item.productId, {
                 stock: newStock,
@@ -704,7 +809,10 @@ const DB = {
               if (v) await this.db.variations.update(item.variationId, { stock: (v.stock || 0) + item.quantity });
             } else {
               const p = await this.db.products.get(item.productId);
-              if (p) await this.db.products.update(item.productId, { stock: (p.stock || 0) + item.quantity });
+              if (p) {
+                const addBack = (p.packetSizeGrams || 0) > 0 ? item.quantity * p.packetSizeGrams : item.quantity;
+                await this.db.products.update(item.productId, { stock: (p.stock || 0) + addBack });
+              }
             }
           }
         }
@@ -776,8 +884,10 @@ const DB = {
             : (p.costPrice || 0);
           const quantity = adj.quantity || 0;
           const lossQty = adj.type === 'in' ? 0 : Math.min(quantity, currentStock);
+          const gpp = p.packetSizeGrams || 0;
+          const lossPackets = gpp > 0 ? (lossQty / gpp) : lossQty;
           adj.costPrice = costPrice;
-          adj.lossAmount = lossQty * costPrice;
+          adj.lossAmount = lossPackets * costPrice;
         }
 
         const id = await this.db.stockAdjustments.add(adj);
@@ -879,6 +989,123 @@ const DB = {
     );
   },
 
+  // ======= CHEQUES =======
+  async getCheques() { return await this.db.cheques.orderBy('createdAt').reverse().toArray(); },
+  async getChequeById(id) { return await this.db.cheques.get(id); },
+
+  async addCheque(data) {
+    const now = new Date().toISOString();
+    return await this.db.cheques.add({ ...data, status: data.status || 'pending', createdAt: now, updatedAt: now });
+  },
+
+  async updateCheque(id, data) {
+    return await this.db.cheques.update(id, { ...data, updatedAt: new Date().toISOString() });
+  },
+
+  async updateChequeStatus(id, newStatus) {
+    const cheque = await this.db.cheques.get(id);
+    if (!cheque) throw new Error('Cheque not found');
+    // Guard invalid transitions
+    if (cheque.status === 'cleared' || cheque.status === 'cancelled') {
+      throw new Error(`Cannot change status from ${cheque.status}`);
+    }
+    if (cheque.status === 'bounced' && newStatus !== 'pending') {
+      throw new Error('A bounced cheque can only be re-presented (set back to Pending)');
+    }
+
+    const now = new Date().toISOString();
+    const update = { status: newStatus, updatedAt: now };
+    if (newStatus === 'deposited') update.depositedDate = now;
+    if (newStatus === 'cleared')   update.clearedDate   = now;
+    if (newStatus === 'bounced')   update.bouncedDate   = now;
+
+    if (newStatus === 'bounced') {
+      return await this.db.transaction('rw', this.db.cheques, this.db.customers, this.db.sales, async () => {
+        await this.db.cheques.update(id, update);
+        if (cheque.customerId) {
+          const c = await this.db.customers.get(cheque.customerId);
+          if (c) {
+            await this.db.customers.update(cheque.customerId, {
+              balance: (c.balance || 0) + (cheque.amount || 0)
+            });
+          }
+        }
+        if (cheque.saleId) {
+          await this.db.sales.update(cheque.saleId, { status: 'bounced' });
+        }
+      });
+    }
+
+    return await this.db.cheques.update(id, update);
+  },
+
+  async deleteCheque(id) {
+    const cheque = await this.db.cheques.get(id);
+    if (!cheque) return;
+    if (cheque.status === 'cleared') throw new Error('Cannot delete a cleared cheque');
+    return await this.db.cheques.delete(id);
+  },
+
+  // Records a customer payment and its cheque together as one atomic operation,
+  // so a failure partway through never leaves a balance change with no cheque record.
+  async addPaymentWithCheque(payment, chequeData) {
+    return await this.db.transaction(
+      'rw',
+      this.db.payments,
+      this.db.customers,
+      this.db.sales,
+      this.db.cheques,
+      async () => {
+        const paymentId = await this.addPayment(payment);
+        const chequeId = await this.addCheque({ ...chequeData, paymentId });
+        return { paymentId, chequeId };
+      }
+    );
+  },
+
+  async getChequeSummary() {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const tomorrow   = new Date(todayStart); tomorrow.setDate(tomorrow.getDate() + 1);
+    const in3Days    = new Date(todayStart); in3Days.setDate(in3Days.getDate() + 4);
+
+    const all     = await this.db.cheques.toArray();
+    const pending = all.filter(c => c.status === 'pending');
+    const bounced = all.filter(c => c.status === 'bounced');
+
+    const dueToday = pending.filter(c => {
+      const d = new Date(c.dueDate); d.setHours(0, 0, 0, 0);
+      return d.getTime() === todayStart.getTime();
+    });
+    const dueSoon = pending.filter(c => {
+      const d = new Date(c.dueDate); d.setHours(0, 0, 0, 0);
+      return d >= tomorrow && d < in3Days;
+    });
+    const overdue = pending.filter(c => {
+      const d = new Date(c.dueDate); d.setHours(0, 0, 0, 0);
+      return d < todayStart;
+    });
+
+    const sum = arr => arr.reduce((s, c) => s + (c.amount || 0), 0);
+    return { pending, pendingAmount: sum(pending), dueToday, dueTodayAmount: sum(dueToday), dueSoon, dueSoonAmount: sum(dueSoon), overdue, overdueAmount: sum(overdue), bounced, bouncedAmount: sum(bounced) };
+  },
+
+  async getCustomerChequeStats(customerId) {
+    const all     = await this.db.cheques.where('customerId').equals(customerId).toArray();
+    const passed  = all.filter(c => c.status === 'deposited' || c.status === 'cleared');
+    const pending = all.filter(c => c.status === 'pending');
+    const bounced = all.filter(c => c.status === 'bounced');
+    const sum = arr => arr.reduce((s, c) => s + (c.amount || 0), 0);
+    return {
+      totalCount:    all.length,
+      passedCount:   passed.length,
+      pendingCount:  pending.length,
+      bouncedCount:  bounced.length,
+      passedAmount:  sum(passed),
+      pendingAmount: sum(pending),
+      bouncedAmount: sum(bounced),
+    };
+  },
+
   // ======= USERS =======
   async getUsers() { return await this.db.users.toArray(); },
   async getUser(id) { return await this.db.users.get(id); },
@@ -948,7 +1175,11 @@ const DB = {
   // ======= LOW STOCK =======
   async getLowStockProducts() {
     const products = await this.db.products.toArray();
-    return products.filter(p => (p.stock || 0) <= (p.reorderLevel || 5));
+    return products.filter(p => {
+      const gpp = p.packetSizeGrams || 0;
+      if (gpp > 0) return Math.floor((p.stock || 0) / gpp) <= (p.reorderLevel || 5);
+      return (p.stock || 0) <= (p.reorderLevel || 5);
+    });
   },
 
   // ======= REPORTS HELPERS =======
@@ -956,14 +1187,14 @@ const DB = {
     const start = Utils.startOfDay(date);
     const end = Utils.endOfDay(date);
     const sales = await this.db.sales.where('createdAt').between(start, end, true, true).toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
 
   async getMonthlySales(year, month) {
     const start = new Date(year, month, 1);
     const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
     const sales = await this.db.sales.where('createdAt').between(start, end, true, true).toArray();
-    return sales.filter(s => s.status !== 'voided');
+    return sales.filter(s => s.status !== 'voided' && s.status !== 'bounced');
   },
 
   // ======= DATA EXPORT/IMPORT =======
@@ -971,7 +1202,7 @@ const DB = {
     const data = {};
     const tables = ['products','categories','variations','customers','suppliers',
       'sales','saleItems','purchases','purchaseItems','returns','returnItems',
-      'stockAdjustments','expenses','payments','users','settings'];
+      'stockAdjustments','expenses','payments','users','settings','cheques'];
     for (const t of tables) {
       data[t] = await this.db[t].toArray();
     }
@@ -981,7 +1212,7 @@ const DB = {
   async importData(data) {
     const tables = ['settings','users','categories','products','variations','customers',
       'suppliers','sales','saleItems','purchases','purchaseItems','returns','returnItems',
-      'stockAdjustments','expenses','payments'];
+      'stockAdjustments','expenses','payments','cheques'];
     await this.db.transaction('rw', ...tables.map(t => this.db[t]), async () => {
       for (const t of tables) {
         await this.db[t].clear();
@@ -1013,91 +1244,47 @@ const DB = {
       { key: 'labelPrinter', value: '' },
       { key: 'receiptPrinter', value: '' },
       { key: 'a4Printer', value: '' },
+      { key: 'a5Printer', value: '' },
       { key: 'businessProfileVersion', value: 'print-care-plus-2026-05' }
     ]);
 
     await this.ensureDefaultUserAccounts();
 
     // Categories
-    const cats = [
-      { name: 'Pens' }, { name: 'Pencils' }, { name: 'Books' },
-      { name: 'Notebooks' }, { name: 'Art Supplies' }, { name: 'Office Items' },
-      { name: 'School Items' }, { name: 'Paper' }, { name: 'Files' },
-      { name: 'Markers' }, { name: 'Erasers' }, { name: 'Rulers' }
-    ];
     const catIds = {};
-    for (const c of cats) {
-      catIds[c.name] = await this.db.categories.add(c);
-    }
+    catIds['Karawala'] = await this.db.categories.add({ name: 'Karawala' });
+    catIds['Sprats']   = await this.db.categories.add({ name: 'Sprats' });
+    catIds['Spices']   = await this.db.categories.add({ name: 'Spices' });
+    catIds['Other']    = await this.db.categories.add({ name: 'Other' });
 
-    // Sample products
+    // Default products
     const products = [
-      { name: 'Pilot G2 Blue', barcode: '100001', categoryId: catIds['Pens'], brand: 'Pilot', sellingPrice: 350, costPrice: 250, stock: 50, reorderLevel: 10, emoji: '🖊️' },
-      { name: 'Pilot G2 Black', barcode: '100002', categoryId: catIds['Pens'], brand: 'Pilot', sellingPrice: 350, costPrice: 250, stock: 45, reorderLevel: 10, emoji: '🖊️' },
-      { name: 'Pilot G2 Red', barcode: '100003', categoryId: catIds['Pens'], brand: 'Pilot', sellingPrice: 350, costPrice: 250, stock: 30, reorderLevel: 10, emoji: '🖊️' },
-      { name: 'BIC Crystal Blue', barcode: '100004', categoryId: catIds['Pens'], brand: 'BIC', sellingPrice: 75, costPrice: 45, stock: 100, reorderLevel: 20, emoji: '🖊️' },
-      { name: 'BIC Crystal Black', barcode: '100005', categoryId: catIds['Pens'], brand: 'BIC', sellingPrice: 75, costPrice: 45, stock: 80, reorderLevel: 20, emoji: '🖊️' },
-      { name: 'Uni-ball Signo', barcode: '100006', categoryId: catIds['Pens'], brand: 'Uni', sellingPrice: 450, costPrice: 320, stock: 25, reorderLevel: 5, emoji: '🖊️' },
-      { name: 'Atlas Chooty Pen', barcode: '100007', categoryId: catIds['Pens'], brand: 'Atlas', sellingPrice: 25, costPrice: 15, stock: 200, reorderLevel: 50, emoji: '🖊️' },
-
-      { name: 'HB Pencil', barcode: '200001', categoryId: catIds['Pencils'], brand: 'Atlas', sellingPrice: 20, costPrice: 12, stock: 300, reorderLevel: 50, emoji: '✏️' },
-      { name: '2B Pencil', barcode: '200002', categoryId: catIds['Pencils'], brand: 'Atlas', sellingPrice: 25, costPrice: 15, stock: 200, reorderLevel: 40, emoji: '✏️' },
-      { name: 'Mechanical Pencil 0.5mm', barcode: '200003', categoryId: catIds['Pencils'], brand: 'Pentel', sellingPrice: 280, costPrice: 180, stock: 40, reorderLevel: 10, emoji: '✏️' },
-      { name: 'Colored Pencils 12 Pack', barcode: '200004', categoryId: catIds['Pencils'], brand: 'Faber-Castell', sellingPrice: 650, costPrice: 450, stock: 20, reorderLevel: 5, emoji: '✏️' },
-
-      { name: 'CR Book 200 Pages', barcode: '300001', categoryId: catIds['Books'], brand: 'Atlas', sellingPrice: 180, costPrice: 130, stock: 60, reorderLevel: 15, emoji: '📚' },
-      { name: 'CR Book 400 Pages', barcode: '300002', categoryId: catIds['Books'], brand: 'Atlas', sellingPrice: 320, costPrice: 240, stock: 40, reorderLevel: 10, emoji: '📚' },
-      { name: 'Square Ruled Book', barcode: '300003', categoryId: catIds['Books'], brand: 'Atlas', sellingPrice: 150, costPrice: 100, stock: 55, reorderLevel: 15, emoji: '📚' },
-
-      { name: 'A4 Notebook 80 Pages', barcode: '400001', categoryId: catIds['Notebooks'], brand: 'Promate', sellingPrice: 220, costPrice: 150, stock: 35, reorderLevel: 10, emoji: '📓' },
-      { name: 'A4 Notebook 120 Pages', barcode: '400002', categoryId: catIds['Notebooks'], brand: 'Promate', sellingPrice: 320, costPrice: 220, stock: 25, reorderLevel: 8, emoji: '📓' },
-      { name: 'A5 Notebook Spiral', barcode: '400003', categoryId: catIds['Notebooks'], brand: 'Promate', sellingPrice: 180, costPrice: 120, stock: 40, reorderLevel: 10, emoji: '📓' },
-
-      { name: 'Watercolor Set 12', barcode: '500001', categoryId: catIds['Art Supplies'], brand: 'Faber-Castell', sellingPrice: 850, costPrice: 600, stock: 15, reorderLevel: 5, emoji: '🎨' },
-      { name: 'Oil Pastel 24 Colors', barcode: '500002', categoryId: catIds['Art Supplies'], brand: 'Faber-Castell', sellingPrice: 950, costPrice: 680, stock: 12, reorderLevel: 3, emoji: '🎨' },
-      { name: 'Paint Brush Set', barcode: '500003', categoryId: catIds['Art Supplies'], brand: 'Generic', sellingPrice: 450, costPrice: 280, stock: 20, reorderLevel: 5, emoji: '🎨' },
-      { name: 'Sketch Pad A4', barcode: '500004', categoryId: catIds['Art Supplies'], brand: 'Generic', sellingPrice: 380, costPrice: 250, stock: 18, reorderLevel: 5, emoji: '🎨' },
-
-      { name: 'Stapler', barcode: '600001', categoryId: catIds['Office Items'], brand: 'Kangaro', sellingPrice: 550, costPrice: 380, stock: 15, reorderLevel: 5, emoji: '📎' },
-      { name: 'Stapler Pins Box', barcode: '600002', categoryId: catIds['Office Items'], brand: 'Kangaro', sellingPrice: 120, costPrice: 70, stock: 50, reorderLevel: 15, emoji: '📎' },
-      { name: 'Paper Clips Box', barcode: '600003', categoryId: catIds['Office Items'], brand: 'Generic', sellingPrice: 80, costPrice: 45, stock: 60, reorderLevel: 15, emoji: '📎' },
-      { name: 'Scotch Tape', barcode: '600004', categoryId: catIds['Office Items'], brand: '3M', sellingPrice: 180, costPrice: 120, stock: 30, reorderLevel: 10, emoji: '📎' },
-      { name: 'Scissors Large', barcode: '600005', categoryId: catIds['Office Items'], brand: 'Generic', sellingPrice: 350, costPrice: 220, stock: 20, reorderLevel: 5, emoji: '✂️' },
-      { name: 'Glue Stick', barcode: '600006', categoryId: catIds['Office Items'], brand: 'UHU', sellingPrice: 150, costPrice: 95, stock: 40, reorderLevel: 10, emoji: '🧴' },
-
-      { name: 'School Bag Blue', barcode: '700001', categoryId: catIds['School Items'], brand: 'Generic', sellingPrice: 2500, costPrice: 1800, stock: 8, reorderLevel: 3, emoji: '🎒' },
-      { name: 'Geometry Box', barcode: '700002', categoryId: catIds['School Items'], brand: 'Maped', sellingPrice: 650, costPrice: 420, stock: 20, reorderLevel: 5, emoji: '📐' },
-      { name: 'Lunch Box', barcode: '700003', categoryId: catIds['School Items'], brand: 'Generic', sellingPrice: 800, costPrice: 550, stock: 12, reorderLevel: 3, emoji: '🍱' },
-
-      { name: 'A4 Paper Ream', barcode: '800001', categoryId: catIds['Paper'], brand: 'IK', sellingPrice: 1200, costPrice: 950, stock: 25, reorderLevel: 5, emoji: '📄' },
-      { name: 'Color Paper Pack', barcode: '800002', categoryId: catIds['Paper'], brand: 'Generic', sellingPrice: 350, costPrice: 220, stock: 15, reorderLevel: 5, emoji: '📄' },
-
-      { name: 'Document File A4', barcode: '900001', categoryId: catIds['Files'], brand: 'Promate', sellingPrice: 250, costPrice: 160, stock: 30, reorderLevel: 10, emoji: '📁' },
-      { name: 'L-Shape Folder Clear', barcode: '900002', categoryId: catIds['Files'], brand: 'Generic', sellingPrice: 45, costPrice: 25, stock: 100, reorderLevel: 25, emoji: '📁' },
-      { name: 'Box File', barcode: '900003', categoryId: catIds['Files'], brand: 'Generic', sellingPrice: 480, costPrice: 320, stock: 15, reorderLevel: 5, emoji: '📁' },
-
-      { name: 'Whiteboard Marker Blue', barcode: '1000001', categoryId: catIds['Markers'], brand: 'Artline', sellingPrice: 280, costPrice: 180, stock: 35, reorderLevel: 10, emoji: '🖍️' },
-      { name: 'Highlighter Yellow', barcode: '1000002', categoryId: catIds['Markers'], brand: 'Stabilo', sellingPrice: 250, costPrice: 160, stock: 30, reorderLevel: 8, emoji: '🖍️' },
-      { name: 'Permanent Marker Blk', barcode: '1000003', categoryId: catIds['Markers'], brand: 'Artline', sellingPrice: 320, costPrice: 210, stock: 25, reorderLevel: 8, emoji: '🖍️' },
-
-      { name: 'Eraser Large', barcode: '1100001', categoryId: catIds['Erasers'], brand: 'Pelikan', sellingPrice: 40, costPrice: 22, stock: 150, reorderLevel: 30, emoji: '🧹' },
-      { name: 'Eraser Small', barcode: '1100002', categoryId: catIds['Erasers'], brand: 'Pelikan', sellingPrice: 20, costPrice: 10, stock: 200, reorderLevel: 50, emoji: '🧹' },
-
-      { name: 'Plastic Ruler 30cm', barcode: '1200001', categoryId: catIds['Rulers'], brand: 'Maped', sellingPrice: 80, costPrice: 45, stock: 60, reorderLevel: 15, emoji: '📏' },
-      { name: 'Steel Ruler 30cm', barcode: '1200002', categoryId: catIds['Rulers'], brand: 'Generic', sellingPrice: 220, costPrice: 140, stock: 20, reorderLevel: 5, emoji: '📏' },
+      { name: 'Balaya',          barcode: 'KW001', categoryId: catIds['Karawala'] },
+      { name: 'Linna',           barcode: 'KW002', categoryId: catIds['Karawala'] },
+      { name: 'Kukula',          barcode: 'KW003', categoryId: catIds['Karawala'] },
+      { name: 'Keerameen',       barcode: 'KW004', categoryId: catIds['Karawala'] },
+      { name: 'Katthah',         barcode: 'KW005', categoryId: catIds['Karawala'] },
+      { name: 'Lanka Keegan',    barcode: 'KW006', categoryId: catIds['Karawala'] },
+      { name: 'Koonisso',        barcode: 'KW007', categoryId: catIds['Karawala'] },
+      { name: 'Bombilly',        barcode: 'KW008', categoryId: catIds['Karawala'] },
+      { name: 'Lena Paraw',      barcode: 'KW009', categoryId: catIds['Karawala'] },
+      { name: 'Sparts Lanka',    barcode: 'SP001', categoryId: catIds['Sprats']   },
+      { name: 'Sparts Iran',     barcode: 'SP002', categoryId: catIds['Sprats']   },
+      { name: 'Sparts Thailand', barcode: 'SP003', categoryId: catIds['Sprats']   },
+      { name: 'Chilly P',        barcode: 'SC001', categoryId: catIds['Spices']   },
+      { name: 'Masala',          barcode: 'SC002', categoryId: catIds['Spices']   },
+      { name: 'R. Masala',       barcode: 'SC003', categoryId: catIds['Spices']   },
+      { name: 'Cutter P',        barcode: 'SC004', categoryId: catIds['Spices']   },
+      { name: 'Safroon',         barcode: 'SC005', categoryId: catIds['Spices']   },
+      { name: 'Cumin Sheed P',   barcode: 'SC006', categoryId: catIds['Spices']   },
+      { name: 'Temric',          barcode: 'SC007', categoryId: catIds['Spices']   },
+      { name: 'Kiri Moru',       barcode: 'OT001', categoryId: catIds['Other']    },
+      { name: 'Hurullo',         barcode: 'OT002', categoryId: catIds['Other']    },
     ];
 
     for (const p of products) {
-      p.createdAt = new Date();
-      await this.db.products.add(p);
+      await this.db.products.add({ ...p, sellingPrice: 0, costPrice: 0, stock: 0, reorderLevel: 5, createdAt: new Date() });
     }
-
-    // Sample suppliers
-    await this.db.suppliers.bulkAdd([
-      { name: 'Atlas Stationary Ltd', phone: '+94 11 222 3333', email: 'sales@atlas.lk', address: 'Colombo 10', createdAt: new Date() },
-      { name: 'Promate Lanka', phone: '+94 11 444 5555', email: 'orders@promate.lk', address: 'Nugegoda', createdAt: new Date() },
-      { name: 'Faber-Castell Distributor', phone: '+94 77 888 9999', email: 'dist@faber.lk', address: 'Maharagama', createdAt: new Date() },
-    ]);
 
     // Sample customers
     await this.db.customers.bulkAdd([

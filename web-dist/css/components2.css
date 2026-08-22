@@ -40,47 +40,50 @@
 }
 .barcode-label {
   box-sizing: border-box;
-  width: 50mm;
-  height: 30mm;
-  padding: 2mm 3mm;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  width: 50mm; height: 30mm;
+  padding: 1mm 1.5mm;
+  display: flex; flex-direction: column;
   overflow: hidden;
-  background: white;
-  color: black;
+  background: white; color: black;
   font-family: Arial, sans-serif;
   box-shadow: var(--shadow-md);
 }
-.barcode-label-name {
-  width: 100%;
-  font-size: 9px;
-  font-weight: 700;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* top section */
+.bl-top {
+  display: flex; flex-direction: row; width: 100%;
+  border-bottom: 0.4px solid #bbb;
+  padding-bottom: 0.4mm; margin-bottom: 0.5mm; flex-shrink: 0;
 }
-#productBarcodeSvg {
-  width: 42mm;
-  height: 12mm;
-  margin-top: 1mm;
+.bl-left {
+  flex: 0 0 58%; display: flex; flex-direction: column;
+  justify-content: center; gap: 0.5mm;
+  border-right: 0.4px solid #bbb; padding-right: 1mm;
 }
-.barcode-label-code {
-  font-size: 8px;
-  letter-spacing: 1px;
-  margin-top: 1mm;
+.bl-date-row { display: flex; align-items: baseline; gap: 1px; }
+.bl-key   { font-size: 6px; font-weight: 700; min-width: 5.5mm; }
+.bl-colon { font-size: 6px; font-weight: 700; margin: 0 0.5px; }
+.bl-dval  { font-size: 6px; font-weight: 700; }
+.bl-right {
+  flex: 0 0 42%; padding-left: 1mm;
+  display: flex; flex-direction: column; justify-content: center;
 }
-.barcode-label-price {
-  font-size: 10px;
-  font-weight: 700;
-  margin-top: 1mm;
+.bl-mrp-key   { font-size: 5px; font-weight: 700; line-height: 1.1; }
+.bl-mrp-val   { font-size: 9px; font-weight: 700; line-height: 1.1; }
+.bl-batch-key { font-size: 5px; font-weight: 700; line-height: 1.1; margin-top: 0.4mm; }
+.bl-batch-val { font-size: 6px; font-weight: 700; line-height: 1.1; }
+/* name / weight / barcode */
+.bl-name {
+  font-size: 8px; font-weight: 700; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.2; flex-shrink: 0;
 }
+.bl-weight { font-size: 5px; font-weight: 700; text-align: center; line-height: 1.2; flex-shrink: 0; }
+.barcode-svg { width: 44mm; height: 10mm; display: block; margin: 0 auto; }
+.bl-code { font-size: 5px; font-weight: 700; text-align: center; line-height: 1.1; flex-shrink: 0; letter-spacing: 0.3px; }
 
 /* Toast */
 .toast-container {
-  position: fixed; top: var(--space-6); right: var(--space-6);
+  position: fixed; top: calc(var(--header-height) + var(--space-4)); right: var(--space-6);
   z-index: var(--z-toast); display: flex; flex-direction: column; gap: var(--space-3);
 }
 .toast {
@@ -119,6 +122,26 @@
 .badge-neutral { background: var(--bg-input); color: var(--text-secondary); }
 .badge-primary { background: var(--primary-bg); color: var(--primary); }
 .badge-dot::before { content:''; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.badge-orange { background: #fff3e0; color: #e65100; }
+
+/* ===== CHEQUE ALERTS (Dashboard) ===== */
+.cheque-alerts-row {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5);
+}
+.cheque-alert-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 120px; padding: 12px 20px; border-radius: var(--radius-md);
+  cursor: pointer; transition: transform 0.15s; text-align: center;
+}
+.cheque-alert-card:hover { transform: translateY(-2px); }
+.cheque-alert-card.overdue   { background: var(--danger-light); color: var(--danger-dark); border: 1px solid var(--danger); }
+.cheque-alert-card.due-today { background: var(--warning-light); color: var(--warning-dark); border: 1px solid var(--warning); }
+.cheque-alert-card.due-soon  { background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; }
+.cheque-alert-card.bounced   { background: #fce7f3; color: #9d174d; border: 1px solid #f9a8d4; }
+.cheque-alert-label  { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.cheque-alert-count  { font-size: 28px; font-weight: 800; line-height: 1.1; }
+.cheque-alert-amount { font-size: 11px; opacity: 0.8; }
 
 /* Tabs */
 .tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; }
@@ -164,6 +187,12 @@
   border: none; cursor: pointer; transition: all var(--transition-fast);
 }
 .product-card-add:hover { background: var(--primary-light); }
+.product-card-add:disabled {
+  background: var(--bg-input); color: var(--text-secondary);
+  cursor: not-allowed; opacity: 0.8;
+}
+.product-card.out-of-stock { cursor: not-allowed; opacity: 0.6; }
+.product-card.out-of-stock:hover { border-color: var(--border); box-shadow: none; transform: none; }
 
 /* Quantity Controls */
 .qty-controls { display: flex; align-items: center; gap: 0; margin-top: var(--space-2); }
@@ -179,17 +208,31 @@
 }
 
 /* Payment Buttons */
-.payment-methods { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.payment-methods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
 .payment-method-btn {
-  display: flex; align-items: center; gap: var(--space-2);
-  padding: var(--space-2) var(--space-4); border: 1.5px solid var(--border);
-  border-radius: var(--radius-md); font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium); color: var(--text-secondary);
-  cursor: pointer; transition: all var(--transition-fast); background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px var(--space-1);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: var(--bg-secondary);
+  text-align: center;
 }
 .payment-method-btn:hover { border-color: var(--primary); color: var(--primary); }
 .payment-method-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
-.payment-method-btn svg { width: 16px; height: 16px; }
+.payment-method-btn svg { width: 14px; height: 14px; }
 
 /* Skeleton Loader */
 .skeleton {
